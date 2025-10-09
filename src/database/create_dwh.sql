@@ -29,191 +29,148 @@ DROP TABLE IF EXISTS dim_patient CASCADE;
 
 -- --------------------------------------------
 -- DIMENSION PATIENT
+-- Source: PostgreSQL.patient
 -- --------------------------------------------
 CREATE TABLE dim_patient (
-    sk_patient BIGSERIAL PRIMARY KEY,
-    id_patient INT UNIQUE NOT NULL,  -- Business Key
-    nom VARCHAR(50),
-    prenom VARCHAR(50),
-    sexe VARCHAR(10),
-    date_naissance DATE,
-    age INT,
-    tranche_age VARCHAR(20),  -- '0-18', '19-30', '31-50', '51-65', '66+'
-    groupe_sanguin VARCHAR(3),
-    poids DECIMAL(5,2),
-    taille INT,
-    code_postal VARCHAR(10),
-    ville VARCHAR(100),
-    pays VARCHAR(2),
-    num_secu_hash VARCHAR(64),  -- SHA256
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    date_modification TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_patient BIGSERIAL PRIMARY KEY,                      -- Auto-généré (séquence PostgreSQL)
+    id_patient INT UNIQUE NOT NULL,                        -- PostgreSQL.patient.id_patient
+    nom VARCHAR(50),                                       -- PostgreSQL.patient.nom (nettoyé: UPPER, TRIM)
+    prenom VARCHAR(50),                                    -- PostgreSQL.patient.prenom (nettoyé: UPPER, TRIM)
+    sexe VARCHAR(10),                                      -- PostgreSQL.patient.sexe (standardisé: M/F)
+    date_naissance DATE,                                   -- PostgreSQL.patient.date_naissance
+    age INT,                                               -- Calculé: DATEDIFF(CURRENT_DATE, date_naissance) / 365
+    tranche_age VARCHAR(20),                               -- Calculé: CASE WHEN age <= 18 THEN '0-18' WHEN age <= 30...
+    groupe_sanguin VARCHAR(3),                             -- PostgreSQL.patient.groupe_sanguin
+    poids DECIMAL(5,2),                                    -- PostgreSQL.patient.poids
+    taille INT,                                            -- PostgreSQL.patient.taille
+    code_postal VARCHAR(10),                               -- PostgreSQL.patient.code_postal (nettoyé: TRIM)
+    ville VARCHAR(100),                                    -- PostgreSQL.patient.ville (nettoyé: UPPER)
+    pays VARCHAR(2),                                       -- PostgreSQL.patient.pays (défaut: 'FR' si NULL)
+    num_secu_hash VARCHAR(64),                             -- Calculé: SHA256(PostgreSQL.patient.num_secu) - RGPD
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- Timestamp automatique du chargement
+    date_modification TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Timestamp automatique de la dernière MAJ
 );
-
-CREATE INDEX idx_patient_id ON dim_patient(id_patient);
-CREATE INDEX idx_patient_sexe_age ON dim_patient(sexe, tranche_age);
-
-COMMENT ON TABLE dim_patient IS 'Dimension Patient - SCD Type 1 - Alimentation mensuelle';
-COMMENT ON COLUMN dim_patient.sk_patient IS 'Surrogate Key (clé technique auto-générée)';
-COMMENT ON COLUMN dim_patient.id_patient IS 'Business Key (clé métier source PostgreSQL)';
-
 
 -- --------------------------------------------
 -- DIMENSION SPECIALITE
+-- Source: PostgreSQL.specialite
 -- --------------------------------------------
 CREATE TABLE dim_specialite (
-    sk_specialite BIGSERIAL PRIMARY KEY,
-    code_specialite VARCHAR(10) UNIQUE NOT NULL,  -- Business Key
-    fonction VARCHAR(100),
-    specialite VARCHAR(100),
-    categorie VARCHAR(50),  -- 'Médecine générale', 'Médecine spécialisée'
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_specialite BIGSERIAL PRIMARY KEY,                   -- Auto-généré
+    code_specialite VARCHAR(10) UNIQUE NOT NULL,           -- PostgreSQL.specialite.code_specialite
+    fonction VARCHAR(100),                                 -- PostgreSQL.specialite.fonction
+    specialite VARCHAR(100),                               -- PostgreSQL.specialite.specialite
+    categorie VARCHAR(50),                                 -- Calculé: regroupement fonction (Médecine générale/spécialisée)
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp automatique
 );
-
-CREATE INDEX idx_specialite_code ON dim_specialite(code_specialite);
-
-COMMENT ON TABLE dim_specialite IS 'Dimension Spécialité médicale - Alimentation mensuelle';
-
 
 -- --------------------------------------------
 -- DIMENSION PROFESSIONNEL
+-- Sources: PostgreSQL.professionnel + PostgreSQL.professionnels_sante
 -- --------------------------------------------
 CREATE TABLE dim_professionnel (
-    sk_professionnel BIGSERIAL PRIMARY KEY,
-    identifiant VARCHAR(20) NOT NULL,  -- RPPS/ADELI - Business Key
-    civilite VARCHAR(10),
-    nom VARCHAR(50),
-    prenom VARCHAR(50),
-    profession VARCHAR(100),
-    categorie_professionnelle VARCHAR(50),
-    fk_specialite BIGINT REFERENCES dim_specialite(sk_specialite),
-    mode_exercice VARCHAR(20),  -- 'Libéral', 'Salarié'
-    fk_organisation VARCHAR(20),  -- FINESS établissement
-    date_debut_validite DATE NOT NULL,
-    date_fin_validite DATE,  -- NULL si version actuelle
-    est_actuel BOOLEAN DEFAULT TRUE,
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_professionnel BIGSERIAL PRIMARY KEY,                -- Auto-généré
+    identifiant VARCHAR(20) NOT NULL,                      -- PostgreSQL.professionnel.identifiant (RPPS/ADELI)
+    civilite VARCHAR(10),                                  -- PostgreSQL.professionnel.civilite
+    nom VARCHAR(50),                                       -- PostgreSQL.professionnel.nom (nettoyé: UPPER)
+    prenom VARCHAR(50),                                    -- PostgreSQL.professionnel.prenom (nettoyé: UPPER)
+    profession VARCHAR(100),                               -- PostgreSQL.professionnel.profession
+    categorie_professionnelle VARCHAR(50),                 -- Calculé: regroupement profession (Médecin/Infirmier/Aide-soignant...)
+    fk_specialite BIGINT REFERENCES dim_specialite,        -- JOIN avec dim_specialite via code_specialite
+    mode_exercice VARCHAR(20),                             -- PostgreSQL.professionnel.mode_exercice
+    fk_organisation VARCHAR(20),                           -- PostgreSQL.professionnels_sante.finess (établissement rattaché)
+    date_debut_validite DATE NOT NULL,                     -- Date du chargement pour SCD Type 2
+    date_fin_validite DATE,                                -- NULL si actuel, sinon date du nouveau chargement
+    est_actuel BOOLEAN DEFAULT TRUE,                       -- TRUE pour version actuelle, FALSE pour historique
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_professionnel_identifiant ON dim_professionnel(identifiant);
-CREATE INDEX idx_professionnel_actuel ON dim_professionnel(est_actuel) WHERE est_actuel = TRUE;
-CREATE INDEX idx_professionnel_organisation ON dim_professionnel(fk_organisation);
-
-COMMENT ON TABLE dim_professionnel IS 'Dimension Professionnel de santé - SCD Type 2 - Alimentation mensuelle';
-COMMENT ON COLUMN dim_professionnel.date_fin_validite IS 'NULL = version actuelle';
-
 
 -- --------------------------------------------
 -- DIMENSION DIAGNOSTIC
+-- Sources: PostgreSQL.diagnostic + Hospitalisation.csv + Etablissement (satisfaction/qualité)
 -- --------------------------------------------
 CREATE TABLE dim_diagnostic (
-    sk_diagnostic BIGSERIAL PRIMARY KEY,
-    code_diagnostic VARCHAR(10) UNIQUE NOT NULL,  -- Code CIM-10 - Business Key
-    libelle_diagnostic VARCHAR(255),
-    categorie_cim10 VARCHAR(5),  -- 3 premiers caractères
-    chapitre_cim10 VARCHAR(100),
-    source_donnee VARCHAR(50),  -- 'PostgreSQL', 'Hospitalisation', 'Etablissement'
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_diagnostic BIGSERIAL PRIMARY KEY,                   -- Auto-généré
+    code_diagnostic VARCHAR(10) UNIQUE NOT NULL,           -- PostgreSQL.diagnostic.code OU Hospitalisation.diagnostic
+    libelle_diagnostic VARCHAR(255),                       -- PostgreSQL.diagnostic.libelle OU lookup CIM-10
+    categorie_cim10 VARCHAR(5),                            -- Calculé: SUBSTRING(code_diagnostic, 1, 3) - 3 premiers caractères
+    chapitre_cim10 VARCHAR(100),                           -- Lookup table CIM-10 par catégorie (A00-B99 = Maladies infectieuses...)
+    source_donnee VARCHAR(50),                             -- Calculé: 'PostgreSQL' / 'Hospitalisation' / 'Etablissement'
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_diagnostic_code ON dim_diagnostic(code_diagnostic);
-CREATE INDEX idx_diagnostic_categorie ON dim_diagnostic(categorie_cim10);
-
-COMMENT ON TABLE dim_diagnostic IS 'Dimension Diagnostic CIM-10 consolidée - Alimentation mensuelle';
-
 
 -- --------------------------------------------
 -- DIMENSION ETABLISSEMENT
+-- Source: PostgreSQL.etablissement
 -- --------------------------------------------
 CREATE TABLE dim_etablissement (
-    sk_etablissement BIGSERIAL PRIMARY KEY,
-    finess VARCHAR(20) UNIQUE NOT NULL,  -- N° FINESS - Business Key
-    nom_etablissement VARCHAR(255),
-    type_etablissement VARCHAR(50),  -- 'CH', 'Privé', 'PSPH/EBNL'
-    categorie VARCHAR(100),
-    region VARCHAR(100),
-    departement VARCHAR(3),
-    adresse VARCHAR(255),
-    code_postal VARCHAR(10),
-    ville VARCHAR(100),
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_etablissement BIGSERIAL PRIMARY KEY,                -- Auto-généré
+    finess VARCHAR(20) UNIQUE NOT NULL,                    -- PostgreSQL.etablissement.finess (N° FINESS)
+    nom_etablissement VARCHAR(255),                        -- PostgreSQL.etablissement.nom
+    type_etablissement VARCHAR(50),                        -- PostgreSQL.etablissement.type (CH/Privé/PSPH-EBNL)
+    categorie VARCHAR(100),                                -- PostgreSQL.etablissement.categorie
+    region VARCHAR(100),                                   -- PostgreSQL.etablissement.region
+    departement VARCHAR(3),                                -- Calculé: SUBSTRING(code_postal, 1, 2 ou 3) OU lookup INSEE
+    adresse VARCHAR(255),                                  -- PostgreSQL.etablissement.adresse
+    code_postal VARCHAR(10),                               -- PostgreSQL.etablissement.code_postal
+    ville VARCHAR(100),                                    -- PostgreSQL.etablissement.ville
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_etablissement_finess ON dim_etablissement(finess);
-CREATE INDEX idx_etablissement_region ON dim_etablissement(region);
-
-COMMENT ON TABLE dim_etablissement IS 'Dimension Établissement de santé - Alimentation mensuelle';
-
 
 -- --------------------------------------------
 -- DIMENSION LOCALISATION
+-- Sources: CONSOLIDATION de toutes les localisations (Patient, Hospitalisation, Décès, Satisfaction)
 -- --------------------------------------------
 CREATE TABLE dim_localisation (
-    sk_localisation BIGSERIAL PRIMARY KEY,
-    code_lieu VARCHAR(10) NOT NULL,  -- Code INSEE ou postal - Business Key
-    nom_lieu VARCHAR(100),
-    code_postal VARCHAR(10),
-    ville VARCHAR(100),
-    departement VARCHAR(3),
-    region VARCHAR(100),
-    pays VARCHAR(2),
-    type_lieu VARCHAR(50),  -- 'Patient', 'Hospitalisation', 'Deces', 'Etablissement'
-    latitude DECIMAL(10,8),
-    longitude DECIMAL(11,8),
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(code_lieu, type_lieu)
+    sk_localisation BIGSERIAL PRIMARY KEY,                 -- Auto-généré
+    code_lieu VARCHAR(10) NOT NULL,                        -- Code INSEE OU code_postal selon source
+    nom_lieu VARCHAR(100),                                 -- Nom de la commune (lookup API communes ou base INSEE)
+    code_postal VARCHAR(10),                               -- Code postal associé (lookup ou extrait source)
+    ville VARCHAR(100),                                    -- Nom ville (PostgreSQL.patient.ville OU Deces.lieu_deces OU lookup)
+    departement VARCHAR(3),                                -- Calculé: SUBSTRING(code_postal, 1, 2) OU lookup INSEE
+    region VARCHAR(100),                                   -- Lookup par département (table référentiel régions) OU sources
+    pays VARCHAR(2),                                       -- Deces.csv.pays_naissance/deces OU 'FR' par défaut
+    type_lieu VARCHAR(50),                                 -- Calculé: 'Patient'/'Hospitalisation'/'Deces'/'Etablissement'
+    latitude DECIMAL(10,8),                                -- API géolocalisation (geocode) à partir code_postal/ville
+    longitude DECIMAL(11,8),                               -- API géolocalisation (geocode) à partir code_postal/ville
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- Timestamp du chargement
+    UNIQUE(code_lieu, type_lieu)                           -- Unicité par code ET type
 );
-
-CREATE INDEX idx_localisation_code ON dim_localisation(code_lieu);
-CREATE INDEX idx_localisation_region ON dim_localisation(region);
-CREATE INDEX idx_localisation_type ON dim_localisation(type_lieu);
-
-COMMENT ON TABLE dim_localisation IS 'Dimension Localisation consolidée toutes sources - Alimentation mensuelle';
-
 
 -- --------------------------------------------
 -- DIMENSION TEMPS
+-- Source: GÉNÉRÉE programmatiquement (2015-2030)
 -- --------------------------------------------
 CREATE TABLE dim_temps (
-    sk_temps BIGINT PRIMARY KEY,  -- Format YYYYMMDD (ex: 20241207)
-    date_complete DATE UNIQUE NOT NULL,  -- Business Key
-    jour INT NOT NULL,
-    mois INT NOT NULL,
-    trimestre INT NOT NULL,
-    semestre INT NOT NULL,
-    annee INT NOT NULL,
-    semaine_annee INT NOT NULL,
-    jour_semaine INT NOT NULL,  -- 1=Lundi, 7=Dimanche
-    nom_jour VARCHAR(10),
-    nom_mois VARCHAR(20),
-    est_weekend BOOLEAN,
-    est_ferie BOOLEAN,
-    saison VARCHAR(20),  -- 'Printemps', 'Été', 'Automne', 'Hiver'
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_temps BIGINT PRIMARY KEY,                           -- Calculé: FORMAT(date, 'YYYYMMDD') ex: 20241207
+    date_complete DATE UNIQUE NOT NULL,                    -- Date générée (boucle 2015-01-01 à 2030-12-31)
+    jour INT NOT NULL,                                     -- Calculé: DAY(date_complete)
+    mois INT NOT NULL,                                     -- Calculé: MONTH(date_complete)
+    trimestre INT NOT NULL,                                -- Calculé: CEIL(mois / 3)
+    semestre INT NOT NULL,                                 -- Calculé: CEIL(mois / 6)
+    annee INT NOT NULL,                                    -- Calculé: YEAR(date_complete)
+    semaine_annee INT NOT NULL,                            -- Calculé: WEEK(date_complete)
+    jour_semaine INT NOT NULL,                             -- Calculé: DAYOFWEEK(date_complete) 1=Lundi, 7=Dimanche
+    nom_jour VARCHAR(10),                                  -- Calculé: CASE jour_semaine WHEN 1 THEN 'Lundi' WHEN 2...
+    nom_mois VARCHAR(20),                                  -- Calculé: CASE mois WHEN 1 THEN 'Janvier' WHEN 2...
+    est_weekend BOOLEAN,                                   -- Calculé: jour_semaine IN (6, 7) = Samedi/Dimanche
+    est_ferie BOOLEAN,                                     -- Lookup table jours fériés français (1er mai, 14 juillet...)
+    saison VARCHAR(20),                                    -- Calculé: CASE mois WHEN 3,4,5 THEN 'Printemps' WHEN 6,7,8...
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_temps_date ON dim_temps(date_complete);
-CREATE INDEX idx_temps_annee_mois ON dim_temps(annee, mois);
-CREATE INDEX idx_temps_trimestre ON dim_temps(annee, trimestre);
-
-COMMENT ON TABLE dim_temps IS 'Dimension Temps consolidée - Période 2015-2030 - Chargement unique';
-
 
 -- --------------------------------------------
 -- DIMENSION MUTUELLE
+-- Source: PostgreSQL.mutuelle
 -- --------------------------------------------
 CREATE TABLE dim_mutuelle (
-    sk_mutuelle BIGSERIAL PRIMARY KEY,
-    id_mut INT UNIQUE NOT NULL,  -- Business Key
-    nom_mutuelle VARCHAR(255),
-    adresse VARCHAR(255),
-    type_mutuelle VARCHAR(50),  -- 'Mutuelle', 'Assurance', 'CMU'
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    sk_mutuelle BIGSERIAL PRIMARY KEY,                     -- Auto-généré
+    id_mut INT UNIQUE NOT NULL,                            -- PostgreSQL.mutuelle.id_mut
+    nom_mutuelle VARCHAR(255),                             -- PostgreSQL.mutuelle.nom_mutuelle
+    adresse VARCHAR(255),                                  -- PostgreSQL.mutuelle.adresse
+    type_mutuelle VARCHAR(50),                             -- Calculé: classification nom (contient 'CMU'→'CMU', 'Assurance'→...)
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_mutuelle_id ON dim_mutuelle(id_mut);
-
-COMMENT ON TABLE dim_mutuelle IS 'Dimension Mutuelle - Alimentation mensuelle';
 
 
 -- ============================================
@@ -222,166 +179,127 @@ COMMENT ON TABLE dim_mutuelle IS 'Dimension Mutuelle - Alimentation mensuelle';
 
 -- --------------------------------------------
 -- FAIT CONSULTATION
+-- Source: PostgreSQL.consultation + Lookups dimensions
+-- Granularité: 1 ligne = 1 consultation
 -- --------------------------------------------
 CREATE TABLE fait_consultation (
-    sk_fait_consultation BIGSERIAL PRIMARY KEY,
-    sk_patient BIGINT NOT NULL REFERENCES dim_patient(sk_patient),
-    sk_professionnel BIGINT NOT NULL REFERENCES dim_professionnel(sk_professionnel),
-    sk_diagnostic BIGINT NOT NULL REFERENCES dim_diagnostic(sk_diagnostic),
-    sk_mutuelle BIGINT REFERENCES dim_mutuelle(sk_mutuelle),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
-    sk_etablissement BIGINT REFERENCES dim_etablissement(sk_etablissement),
+    sk_fait_consultation BIGSERIAL PRIMARY KEY,            -- Auto-généré
+    sk_patient BIGINT NOT NULL REFERENCES dim_patient,     -- Lookup dim_patient via PostgreSQL.consultation.id_patient
+    sk_professionnel BIGINT NOT NULL REFERENCES dim_professionnel, -- Lookup dim_professionnel via PostgreSQL.consultation.identifiant
+    sk_diagnostic BIGINT NOT NULL REFERENCES dim_diagnostic,  -- Lookup dim_diagnostic via PostgreSQL.consultation.code_diagnostic
+    sk_mutuelle BIGINT REFERENCES dim_mutuelle,            -- Lookup dim_mutuelle via PostgreSQL.consultation.id_mut (peut être NULL)
+    sk_temps BIGINT NOT NULL REFERENCES dim_temps,         -- Lookup dim_temps via PostgreSQL.consultation.date_consultation
+    sk_etablissement BIGINT REFERENCES dim_etablissement,  -- Lookup via dim_professionnel.fk_organisation (peut être NULL libéral)
     
-    -- Dimensions dégénérées
-    num_consultation INT,
-    heure_debut TIME,
-    heure_fin TIME,
-    motif VARCHAR(255),
+    -- Dimensions dégénérées (attributs bas niveau gardés dans le fait)
+    num_consultation INT,                                  -- PostgreSQL.consultation.num_consultation
+    heure_debut TIME,                                      -- PostgreSQL.consultation.heure_debut
+    heure_fin TIME,                                        -- PostgreSQL.consultation.heure_fin
+    motif VARCHAR(255),                                    -- PostgreSQL.consultation.motif
     
-    -- MESURES
-    duree_consultation INT,  -- en minutes
-    nombre_consultations INT DEFAULT 1,  -- COUNT
+    -- MESURES (métriques agrégables)
+    duree_consultation INT,                                -- Calculé: TIMESTAMPDIFF(MINUTE, heure_debut, heure_fin)
+    nombre_consultations INT DEFAULT 1,                    -- Constante: 1 pour COUNT (1 ligne = 1 consultation)
     
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_fait_consultation_patient ON fait_consultation(sk_patient);
-CREATE INDEX idx_fait_consultation_professionnel ON fait_consultation(sk_professionnel);
-CREATE INDEX idx_fait_consultation_diagnostic ON fait_consultation(sk_diagnostic);
-CREATE INDEX idx_fait_consultation_temps ON fait_consultation(sk_temps);
-CREATE INDEX idx_fait_consultation_etablissement ON fait_consultation(sk_etablissement);
-
-COMMENT ON TABLE fait_consultation IS 'Fait Consultation - Chargement quotidien incrémental';
-COMMENT ON COLUMN fait_consultation.duree_consultation IS 'MESURE : Durée en minutes';
-COMMENT ON COLUMN fait_consultation.nombre_consultations IS 'MESURE : COUNT = 1';
-
 
 -- --------------------------------------------
 -- FAIT HOSPITALISATION
+-- Source: Hospitalisation.csv + Lookups dimensions
+-- Granularité: 1 ligne = 1 séjour hospitalier complet
 -- --------------------------------------------
 CREATE TABLE fait_hospitalisation (
-    sk_fait_hospitalisation BIGSERIAL PRIMARY KEY,
-    sk_patient BIGINT NOT NULL REFERENCES dim_patient(sk_patient),
-    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement(sk_etablissement),
-    sk_diagnostic BIGINT NOT NULL REFERENCES dim_diagnostic(sk_diagnostic),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
-    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation(sk_localisation),
+    sk_fait_hospitalisation BIGSERIAL PRIMARY KEY,         -- Auto-généré
+    sk_patient BIGINT NOT NULL REFERENCES dim_patient,     -- Lookup dim_patient via matching (nom, prénom, date_naissance) Hospitalisation.csv
+    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement,  -- Lookup dim_etablissement via Hospitalisation.csv (établissement/FINESS)
+    sk_diagnostic BIGINT NOT NULL REFERENCES dim_diagnostic,  -- Lookup dim_diagnostic via Hospitalisation.csv.diagnostic (code CIM-10)
+    sk_temps BIGINT NOT NULL REFERENCES dim_temps,         -- Lookup dim_temps via Hospitalisation.csv.date_entree (ou date_sortie)
+    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation,  -- Lookup dim_localisation via Hospitalisation.csv (localisation séjour)
     
     -- Dimensions dégénérées
-    num_hospitalisation INT,
+    num_hospitalisation INT,                               -- Numéro séjour (si présent) OU généré séquentiellement
     
     -- MESURES
-    jour_hospitalisation INT,  -- Durée séjour en jours
-    nombre_hospitalisations INT DEFAULT 1,  -- COUNT
+    jour_hospitalisation INT,                              -- Calculé: DATEDIFF(date_sortie, date_entree) depuis Hospitalisation.csv
+    nombre_hospitalisations INT DEFAULT 1,                 -- Constante: 1 pour COUNT (1 ligne = 1 séjour)
     
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_fait_hospitalisation_patient ON fait_hospitalisation(sk_patient);
-CREATE INDEX idx_fait_hospitalisation_etablissement ON fait_hospitalisation(sk_etablissement);
-CREATE INDEX idx_fait_hospitalisation_diagnostic ON fait_hospitalisation(sk_diagnostic);
-CREATE INDEX idx_fait_hospitalisation_temps ON fait_hospitalisation(sk_temps);
-CREATE INDEX idx_fait_hospitalisation_localisation ON fait_hospitalisation(sk_localisation);
-
-COMMENT ON TABLE fait_hospitalisation IS 'Fait Hospitalisation - Chargement mensuel';
-COMMENT ON COLUMN fait_hospitalisation.jour_hospitalisation IS 'MESURE : Durée séjour en jours';
-COMMENT ON COLUMN fait_hospitalisation.nombre_hospitalisations IS 'MESURE : COUNT = 1';
-
 
 -- --------------------------------------------
 -- FAIT DECES
+-- Source: Deces.csv (INSEE Open Data)
+-- Granularité: 1 ligne = 1 décès
 -- --------------------------------------------
 CREATE TABLE fait_deces (
-    sk_fait_deces BIGSERIAL PRIMARY KEY,
-    sk_patient BIGINT REFERENCES dim_patient(sk_patient),  -- Peut être NULL
-    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation(sk_localisation),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
+    sk_fait_deces BIGSERIAL PRIMARY KEY,                   -- Auto-généré
+    sk_patient BIGINT REFERENCES dim_patient,              -- Lookup dim_patient via matching (nom, prenom, date_naissance) - PEUT ÊTRE NULL si pas trouvé
+    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation,  -- Lookup dim_localisation via Deces.csv.code_lieu_deces
+    sk_temps BIGINT NOT NULL REFERENCES dim_temps,         -- Lookup dim_temps via Deces.csv.date_deces
     
     -- Dimensions dégénérées
-    code_lieu_deces VARCHAR(10),
-    numero_acte_deces VARCHAR(20),
+    code_lieu_deces VARCHAR(10),                           -- Deces.csv.code_lieu_deces (code INSEE)
+    numero_acte_deces VARCHAR(20),                         -- Deces.csv.numero_acte_deces
     
     -- MESURES
-    age_deces INT,
-    nombre_deces INT DEFAULT 1,  -- COUNT
+    age_deces INT,                                         -- Calculé: DATEDIFF(date_deces, date_naissance) / 365 depuis Deces.csv
+    nombre_deces INT DEFAULT 1,                            -- Constante: 1 pour COUNT (1 ligne = 1 décès)
     
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_fait_deces_patient ON fait_deces(sk_patient);
-CREATE INDEX idx_fait_deces_localisation ON fait_deces(sk_localisation);
-CREATE INDEX idx_fait_deces_temps ON fait_deces(sk_temps);
-
-COMMENT ON TABLE fait_deces IS 'Fait Décès - Chargement annuel';
-COMMENT ON COLUMN fait_deces.sk_patient IS 'Peut être NULL si patient non identifié';
-COMMENT ON COLUMN fait_deces.age_deces IS 'MESURE : Âge au décès';
-COMMENT ON COLUMN fait_deces.nombre_deces IS 'MESURE : COUNT = 1';
-
 
 -- --------------------------------------------
 -- FAIT SATISFACTION
+-- Source: resultatsesatis*.csv + lexiqueesatis*.csv (e-Satis 48h MCO Open Data)
+-- Granularité: 1 ligne = 1 établissement × 1 année
 -- --------------------------------------------
 CREATE TABLE fait_satisfaction (
-    sk_fait_satisfaction BIGSERIAL PRIMARY KEY,
-    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement(sk_etablissement),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
-    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation(sk_localisation),
+    sk_fait_satisfaction BIGSERIAL PRIMARY KEY,            -- Auto-généré
+    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement,  -- Lookup dim_etablissement via resultats.finess
+    sk_temps BIGINT NOT NULL REFERENCES dim_temps,         -- Lookup dim_temps via année fichier (1er janvier année N)
+    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation,  -- Lookup dim_localisation via resultats.region (région établissement)
     
-    -- MESURES
-    score_global DECIMAL(5,2),
-    score_accueil DECIMAL(5,2),
-    score_pec_infirmiers DECIMAL(5,2),
-    score_pec_medecins DECIMAL(5,2),
-    score_chambre DECIMAL(5,2),
-    score_repas DECIMAL(5,2),
-    score_sortie DECIMAL(5,2),
-    taux_recommandation DECIMAL(5,2),
-    nombre_reponses INT,
+    -- MESURES (scores e-Satis agrégés par établissement)
+    score_global DECIMAL(5,2),                             -- resultatsesatis.score_global OU moyenne pondérée autres scores
+    score_accueil DECIMAL(5,2),                            -- resultatsesatis.score_accueil (si colonne existe selon année)
+    score_pec_infirmiers DECIMAL(5,2),                     -- resultatsesatis.score_pec_infirmiers (prise en charge infirmiers)
+    score_pec_medecins DECIMAL(5,2),                       -- resultatsesatis.score_pec_medecins (prise en charge médecins)
+    score_chambre DECIMAL(5,2),                            -- resultatsesatis.score_chambre (qualité chambre)
+    score_repas DECIMAL(5,2),                              -- resultatsesatis.score_repas (qualité repas)
+    score_sortie DECIMAL(5,2),                             -- resultatsesatis.score_sortie (organisation sortie)
+    taux_recommandation DECIMAL(5,2),                      -- resultatsesatis.taux_recommandation (% patients recommandent)
+    nombre_reponses INT,                                   -- resultatsesatis.nombre_reponses (nb questionnaires exploitables)
     
     -- Dimensions dégénérées
-    classement VARCHAR(2),  -- 'A', 'B', 'C', 'D', 'DI'
-    evolution VARCHAR(10),
+    classement VARCHAR(2),                                 -- resultatsesatis.classement ('A', 'B', 'C', 'D', 'DI')
+    evolution VARCHAR(10),                                 -- resultatsesatis.evolution (vs année N-1: 'Hausse'/'Baisse'/'Stable')
     
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_fait_satisfaction_etablissement ON fait_satisfaction(sk_etablissement);
-CREATE INDEX idx_fait_satisfaction_temps ON fait_satisfaction(sk_temps);
-CREATE INDEX idx_fait_satisfaction_localisation ON fait_satisfaction(sk_localisation);
-
-COMMENT ON TABLE fait_satisfaction IS 'Fait Satisfaction e-Satis 48h MCO - Chargement annuel';
-COMMENT ON COLUMN fait_satisfaction.score_global IS 'MESURE : Score satisfaction global';
-COMMENT ON COLUMN fait_satisfaction.nombre_reponses IS 'MESURE : Nombre réponses exploitables';
-
 
 -- --------------------------------------------
 -- FAIT QUALITE SOINS
+-- Source: resultatsiqss*.csv + lexiqueiqss*.csv (IQSS Open Data)
+-- Granularité: 1 ligne = 1 établissement × 1 année
 -- --------------------------------------------
 CREATE TABLE fait_qualite_soins (
-    sk_fait_qualite BIGSERIAL PRIMARY KEY,
-    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement(sk_etablissement),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
-    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation(sk_localisation),
+    sk_fait_qualite BIGSERIAL PRIMARY KEY,                 -- Auto-généré
+    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement,  -- Lookup dim_etablissement via resultats.finess
+    sk_temps BIGINT NOT NULL REFERENCES dim_temps,         -- Lookup dim_temps via année fichier (1er janvier année N)
+    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation,  -- Lookup dim_localisation via resultats.region
     
-    -- MESURES
-    ratio_ete_ortho DECIMAL(10,6),  -- Événements thrombo-emboliques
-    alerte_ete INT,  -- 0=Normal, 1=Alerte
-    ratio_iso_ortho DECIMAL(10,6),  -- Infections site opératoire
-    alerte_iso INT,  -- 0=Normal, 1=Alerte
+    -- MESURES (indicateurs qualité IQSS)
+    ratio_ete_ortho DECIMAL(10,6),                         -- resultatsiqss.ratio_ete_ortho (taux événements thrombo-emboliques post-chirurgie ortho)
+    alerte_ete INT,                                        -- Calculé: IF(ratio_ete_ortho > seuil_alerte, 1, 0) - seuil depuis lexique
+    ratio_iso_ortho DECIMAL(10,6),                         -- resultatsiqss.ratio_iso_ortho (taux infections site opératoire post-ortho)
+    alerte_iso INT,                                        -- Calculé: IF(ratio_iso_ortho > seuil_alerte, 1, 0) - seuil depuis lexique
     
     -- Dimensions dégénérées
-    evolution_ete VARCHAR(10),
+    evolution_ete VARCHAR(10),                             -- resultatsiqss.evolution_ete (vs année N-1: 'Amélioration'/'Dégradation')
     
-    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP    -- Timestamp du chargement
 );
-
-CREATE INDEX idx_fait_qualite_etablissement ON fait_qualite_soins(sk_etablissement);
-CREATE INDEX idx_fait_qualite_temps ON fait_qualite_soins(sk_temps);
-CREATE INDEX idx_fait_qualite_localisation ON fait_qualite_soins(sk_localisation);
-
-COMMENT ON TABLE fait_qualite_soins IS 'Fait Qualité Soins IQSS - Chargement annuel';
-COMMENT ON COLUMN fait_qualite_soins.ratio_ete_ortho IS 'MESURE : Ratio événements thrombo-emboliques';
-COMMENT ON COLUMN fait_qualite_soins.ratio_iso_ortho IS 'MESURE : Ratio infections site opératoire';
 
 
 -- ============================================
