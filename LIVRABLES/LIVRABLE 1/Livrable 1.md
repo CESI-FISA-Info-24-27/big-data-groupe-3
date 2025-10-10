@@ -430,7 +430,7 @@ Notre architecture de traitement suit une approche ELT structurée en plusieurs 
 
 ---
 
-## 4. Architecture des données dans le datalake
+## 4. Architecture des données
 
 Notre architecture repose sur une séparation logique en quatre zones au sein de DuckDB, suivie d'une zone finale dans PostgreSQL. Cette structuration en couches garantit la traçabilité, la qualité des données et la performance.
 
