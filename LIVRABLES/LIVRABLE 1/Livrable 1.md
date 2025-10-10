@@ -370,8 +370,6 @@ Notre architecture de traitement suit une approche ELT structurée en plusieurs 
 
 **Source PostgreSQL** : Extraction des tables consultations, hospitalisations, professionnels depuis la base de données opérationnelle. Mode incrémental basé sur les dates de modification pour optimiser les volumes.
 
-**Source FTP** : Téléchargement des fichiers ESATIS (satisfaction) et du registre national des décès depuis les serveurs gouvernementaux. Archivage systématique pour traçabilité.
-
 #### Phase 2 : Nettoyage et normalisation
 
 **Objectif** : Produire des données propres et homogènes avant intégration.
@@ -381,12 +379,12 @@ Notre architecture de traitement suit une approche ELT structurée en plusieurs 
 - Suppression des doublons stricts
 - Normalisation des formats de dates (ISO 8601)
 - Standardisation des codes géographiques
-- Gestion des valeurs nulles et aberrantes
+- Gestion des valeurs nulles et erronées
 - Validation des contraintes métier
 
 #### Phase 3 : Construction des dimensions
 
-**Dimensions de référence** : Génération ou import des dimensions stables (temps, localisation, spécialités) qui serviront de référentiel pour toute l'analyse.
+**Dimensions de référence** : Génération des dimensions stables (temps, localisation, spécialités) qui serviront de référentiel pour toute l'analyse.
 
 **Dimensions métier** : Construction des dimensions patient, professionnel, diagnostic, établissement, mutuelle par extraction, déduplication et enrichissement des données sources.
 
@@ -417,14 +415,9 @@ Notre architecture de traitement suit une approche ELT structurée en plusieurs 
 - Évolution temporelle de la satisfaction
 - Benchmarking qualité inter-établissements
 
-#### Orchestration et fréquences
+#### Orchestration
 
 **Orchestration Airflow** : L'ensemble des flux est orchestré via Apache Airflow avec gestion des dépendances, monitoring et alerting.
-
-**Fréquences de chargement** :
-- Données quotidiennes : consultations, hospitalisations (incrémental)
-- Données mensuelles : satisfaction, décès, référentiels (complet)
-- Rechargement complet : mensuel le premier dimanche du mois
 
 **Gestion des erreurs** : Mécanisme de retry automatique, alerting en cas d'échec, logs détaillés pour debugging.
 
@@ -441,7 +434,6 @@ Notre architecture repose sur une séparation logique en quatre zones au sein de
 **Contenu** :
 - Fichiers CSV bruts (encodage d'origine préservé)
 - Extractions PostgreSQL
-- Fichiers FTP téléchargés
 
 **Rétention** : 90 jours (permettant les rejeux en cas d'erreur de transformation)
 
@@ -530,8 +522,6 @@ Nous avons remplacé l'approche classique des contextes Talend par une gestion m
 
 **Variables d'orchestration Airflow** : Toutes les configurations sont stockées de manière centralisée dans Airflow :
 - Connexions aux bases de données (source et cible)
-- Chemins du datalake (raw, staging, ods)
-- Paramètres FTP
 - Seuils de qualité
 - Périodes de chargement
 
@@ -555,7 +545,7 @@ Cette approche répond pleinement aux exigences du cahier des charges concernant
 
 ## Conclusion
 
-Ce premier livrable établit les fondations solides de notre projet Cloud Healthcare Unit. Nous avons :
+Ce premier livrable établit les fondations solides de notre projet CHU. Nous avons :
 
 **Justifié nos choix technologiques** : Notre stack moderne (DuckDB, DBT, Airflow, PostgreSQL, Power BI) offre un excellent compromis entre simplicité, performance et maintenabilité, parfaitement adaptée à nos volumes et contraintes.
 
