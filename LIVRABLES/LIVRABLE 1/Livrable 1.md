@@ -43,7 +43,7 @@ Création des tables physiques, chargement et validation des données, tests de 
 Restitution et valorisation des données : définition des indicateurs clés, création du tableau de bord, interprétation des résultats et préparation de la soutenance.
 La planification suit une logique séquentielle tout en intégrant certaines tâches parallélisables (par exemple, étude des sources et modélisation). Des marges sont prévues pour absorber les ajustements nécessaires lors des validations et optimisations.
 
-![Diagramme de Gantt](../../GANTT/BIG_DATA_GANTT.png)
+![Diagramme de Gantt](../GANTT/BIG_DATA_GANTT.png)
 
 ---
 
@@ -80,24 +80,24 @@ Cette architecture est :
 - alignée avec les pratiques modernes (ELT, orchestration as code, transformations SQL déclaratives),
 - adaptée au contexte du CHU et aux contraintes pédagogiques.
 
-![Schéma Stack](<stack/Stack Technique.png>)
+![Schéma Stack](<images/stack/Stack Technique.png>)
 
 ---
 
 ## 3. Modélisation conceptuelle des données (MCD)
 *Section à compléter avec le diagramme et la description du modèle en étoile / constellation.*
 
-![Etoile consultation](<etoiles/Etoile consultation.png>) 
+![Etoile consultation](<images/etoiles/Etoile consultation.png>) 
 
-![Etoile décès](<etoiles/Etoile deces.png>) 
+![Etoile décès](<images/etoiles/Etoile deces.png>) 
 
-![Etoile hospitalisation](<etoiles/Etoile hospitalisation.png>) 
+![Etoile hospitalisation](<images/etoiles/Etoile hospitalisation.png>) 
 
-![Etoile qualité soins](<etoiles/Etoile qualite soins.png>) 
+![Etoile qualité soins](<images/etoiles/Etoile qualite soins.png>) 
 
-![Etoile satisfaction](<etoiles/Etoiles satisfaction.png>)
+![Etoile satisfaction](<images/etoiles/Etoiles satisfaction.png>)
 
-![MLD constellation](mld/MLD.png)
+![MLD constellation](images/mld/MLD.png)
 
 ---
 
