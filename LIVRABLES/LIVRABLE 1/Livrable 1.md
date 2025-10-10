@@ -1,170 +1,568 @@
 # Livrable 1 – Référentiel de données
-**Projet : Cloud Healthcare Unit (CHU)**
 
 ---
 
 ## Introduction
-Le secteur de la santé connaît aujourd'hui une profonde mutation numérique, portée par l'explosion du volume et de la diversité des données médicales générées quotidiennement. Ces données, issues notamment des systèmes de gestion hospitaliers, des plateformes FTP ou encore des bases administratives, représentent une source d'informations stratégiques encore largement sous-exploitée. 
 
-Dans ce contexte, la capacité à collecter, intégrer, consolider et analyser ces données de manière fiable et sécurisée est devenue un levier majeur d'amélioration de la qualité des soins et de la performance organisationnelle.
+Le secteur de la santé connaît aujourd'hui une transformation numérique profonde. Les établissements hospitaliers génèrent quotidiennement des volumes considérables de données médicales et administratives qui constituent un potentiel d'analyse encore largement inexploité. Ces données, dispersées entre systèmes de gestion, plateformes FTP et bases administratives, représentent pourtant un moyen pour améliorer la qualité des soins et optimiser la performance organisationnelle.
 
-Le groupe CHU (Cloud Healthcare Unit) souhaite ainsi amorcer une transformation digitale en mettant en place son propre entrepôt de données. 
+Dans ce contexte, le groupe CHU nous a confié la mise en place d'un entrepôt de données moderne et évolutif. 
 
-L'objectif est de disposer d'une solution décisionnelle robuste et évolutive, capable d'agréger des sources hétérogènes pour permettre aux praticiens et aux responsables d'établissement d'accéder à des analyses fiables et exploitables. Ces analyses portent notamment sur le suivi des consultations, des hospitalisations, des diagnostics, des taux de satisfaction et des statistiques de mortalité au niveau national.
+Notre objectif : permettre aux praticiens et aux responsables d'établissement d'accéder à des analyses fiables sur les consultations, les hospitalisations, les diagnostics, la satisfaction patient et les indicateurs qualité.
 
-Le livrable 1 s'inscrit dans la première phase du projet. Il consiste à définir le référentiel de données qui servira de fondation à l'entrepôt décisionnel. 
+Ce premier livrable constitue la base de notre projet. Nous y détaillons nos choix architecturaux, justifions notre modélisation dimensionnelle et décrivons notre approche méthodologique. 
 
-Cette étape comprend :
-- la modélisation conceptuelle adaptée aux besoins d'analyse,
-- la justification des choix technologiques,
-- la description de l'architecture cible,
-- la définition des dimensions et faits décisionnels,
-- la gestion des contextes techniques.
+Il comprend :
 
-Une planification structurée sur quatre semaines accompagne ce livrable afin d'assurer une exécution coordonnée et progressive du projet.
+- La planification détaillée du projet sur quatre semaines
+- Le choix et la justification de notre stack technologique
+- La modélisation de notre base de données (en constellation)
+- La description des dimensions et tables de faits
+- L'approche de gestion des environnements
 
 ---
 
 ## 1. Planification du projet – Diagramme de Gantt
-Afin de structurer efficacement l'avancement du projet Cloud Healthcare Unit, une planification détaillée a été élaborée à l'aide d'un diagramme de Gantt sur quatre semaines. 
-Elle permet de visualiser l'enchaînement logique des tâches, de clarifier les dépendances et d'assurer une répartition équilibrée du travail.
 
-### Principaux livrables
-**Livrable 1 – Référentiel de données**
+Pour rappel, le projet est structuré sur quatre semaines avec trois livrables successifs permettant des validations intermédiaires régulières.
 
-Analyse des besoins, étude des sources, modélisation conceptuelle, conception du schéma décisionnel, mise en place des premiers flux ETL et validation.
+### Architecture des livrables
 
-**Livrable 2 – Modèle physique et optimisation**
+**Livrable 1 – Référentiel de données (Semaine 1)**
 
-Création des tables physiques, chargement et validation des données, tests de performance et optimisations (partitionnement, indexation, bucketing).
+Cette phase initiale pose les fondations du projet. Nous y réalisons l'analyse des besoins métier, l'étude approfondie des sources de données, la modélisation conceptuelle et la conception du schéma décisionnel. Nous définissons également l'architecture technique.
 
-**Livrable 3 – Présentation et storytelling**
+**Livrable 2 – Modèle physique et optimisation (Semaines 2-3)**
 
-Restitution et valorisation des données : définition des indicateurs clés, création du tableau de bord, interprétation des résultats et préparation de la soutenance.
-La planification suit une logique séquentielle tout en intégrant certaines tâches parallélisables (par exemple, étude des sources et modélisation). Des marges sont prévues pour absorber les ajustements nécessaires lors des validations et optimisations.
+Une fois le modèle conceptuel validé, nous passons à l'implémentation technique. Cette phase comprend la création des tables physiques dans PostgreSQL, le chargement initial des données, les tests de validation métier, et l'optimisation des performances (indexation, partitionnement, ajustement des requêtes).
+
+**Livrable 3 – Présentation et storytelling (Semaine 4)**
+
+La phase finale valorise les données collectées. Nous définissons les indicateurs clés de performance, créons les tableaux de bord Power BI avec mise en place du Row-Level Security, interprétons les premiers résultats et préparons la présentation finale du projet.
 
 ![Diagramme de Gantt](../GANTT/BIG_DATA_GANTT.png)
 
 ---
 
 ## 2. Stack technologique et architecture cible
-La stack initialement préconisée (Talend, Hadoop, Hive, Spark) correspond à une approche Big Data classique, mais elle présente plusieurs limites dans le contexte du projet :
-- Complexité d'intégration et de déploiement, peu adaptée à un environnement pédagogique.
-- Manque de souplesse pour des volumes structurés et semi-structurés de taille moyenne.
-- Courbe d'apprentissage élevée pour des besoins couverts plus simplement par des outils modernes.
-- Manque d'agilité pour mettre en place rapidement une architecture analytique modulaire.
 
-### Stack adoptée
-Nous avons opté pour une stack moderne et légère, structurée en cinq couches :
+### 2.1. Analyse critique de la stack initiale
 
-**Source de données**
-Fichiers CSV/Excel, base PostgreSQL, fichiers plats FTP (satisfaction et décès).
+La stack initialement proposée (Talend, Hadoop, Hive, Spark) représente une architecture Big Data éprouvée mais présente plusieurs inadéquations avec notre contexte :
 
-**Ingestion**
-Orchestration par Apache Airflow ; extraction en Python ; chargement dans DuckDB.
+**Complexité disproportionnée** : Le déploiement et la maintenance d'un cluster Hadoop nécessitent des compétences spécialisées et un temps de mise en œuvre conséquent, peu cohérent avec notre délai d'un mois.
 
-**Transformation**
-Transformations avec DBT dans DuckDB, génération de fichiers Parquet, export vers PostgreSQL.
+**Surdimensionnement** : Nos volumes de données (quelques millions d'enregistrements) ne justifient pas une infrastructure distribuée conçue pour des pétaoctets.
 
-**Data Warehouse**
-Modèle en constellation dans PostgreSQL avec dimensions partagées et datamarts.
+**Rigidité** : L'architecture Hadoop est optimale pour des traitements batch massifs, moins pour nos besoins d'analyses interactives et d'itérations rapides.
 
-**Visualisation**
-Power BI pour la restitution, avec Row-Level Security (RLS) par service.
+### 2.2. Notre proposition : une architecture moderne en 5 couches
 
-### Justification
-Cette architecture est :
-- simple et rapide à mettre en œuvre (outils légers et open source),
-- performante pour des volumes moyens grâce à DuckDB et PostgreSQL,
-- modulaire et évolutive, chaque couche étant indépendante,
-- alignée avec les pratiques modernes (ELT, orchestration as code, transformations SQL déclaratives),
-- adaptée au contexte du CHU et aux contraintes pédagogiques.
+Nous avons conçu une architecture beaucoup plus moderne, privilégiant la simplicité opérationnelle, les performances et l'évolutivité.
 
 ![Schéma Stack](<images/stack/Stack Technique.png>)
 
+### 2.3. Justification des choix technologiques
+
+**DuckDB** : C'est un moteur analytique en mémoire qui offre des performances exceptionnelles sur nos volumes de données. Sa capacité à traiter plusieurs millions de lignes en quelques secondes, combinée à sa simplicité de déploiement, en fait un choix optimal pour notre zone de staging et nos transformations.
+
+**DBT** : Plutôt que de développer des scripts ETL complexes, DBT nous permet d'écrire nos transformations en SQL pur avec de la documentation automatique et des tests intégrés. Cette approche garantit la maintenabilité et la transparence de notre code.
+
+**Apache Airflow** : C'est un standard de l'orchestration data, Airflow offre une interface de monitoring très claire, une gestion robuste des dépendances ainsi que pour les erreurs et une forte communauté. Son approche "configuration as code" facilite le versionnement et les déploiements.
+
+**PostgreSQL** : Pour le warehouse final, nous avons décidé d'utiliser PostgreSQL qui offre d'excellentes performances pour nos volumes.
+
+**Architecture ELT vs ETL** : Nous avons opté pour une approche ELT (Extract-Load-Transform) plutôt qu'ETL traditionnelle. Les transformations s'effectuent dans DuckDB, cela permet d'exploiter la puissance de calcul de DuckDB plutôt que de la délocaliser dans des outils tiers.
+
+Cette stack nous permet de déployer l'infrastructure complète rapidement, d'avoir d'excellentes performances et de garantir une maintenance simple pour les équipes du CHU.
+
 ---
 
-## 3. Modélisation conceptuelle des données (MCD)
-*Section à compléter avec le diagramme et la description du modèle en étoile / constellation.*
+## 3. Modélisation conceptuelle des données
 
-![Etoile consultation](<images/etoiles/Etoile consultation.png>) 
+### 3.1. Choix du modèle en constellation
 
-![Etoile décès](<images/etoiles/Etoile deces.png>) 
+Notre analyse des besoins métier a révélé cinq domaines d'analyse distincts, chacun avec ses propres métriques et grains d'analyse :
 
-![Etoile hospitalisation](<images/etoiles/Etoile hospitalisation.png>) 
+- Les **consultations** (activité médicale quotidienne)
+- Les **hospitalisations** (gestion des séjours)
+- La **mortalité** (statistiques épidémiologiques)
+- La **satisfaction patient** (enquêtes périodiques)
+- La **qualité des soins** (indicateurs IPAQSS)
 
-![Etoile qualité soins](<images/etoiles/Etoile qualite soins.png>) 
+Nous avons écarté le modèle en étoile unique pour plusieurs raisons :
 
-![Etoile satisfaction](<images/etoiles/Etoiles satisfaction.png>)
+**Grains d'analyse incompatibles** : Une consultation individuelle et une enquête de satisfaction annuelle ne peuvent partager le même niveau de granularité sans créer de redondance massive ou de complexité requêtable.
+
+**Performance** : Séparer les faits permet d'optimiser indépendamment chaque domaine (partitionnement, indexation) et de garantir des temps de réponse acceptables même sur des requêtes complexes.
+
+**Évolutivité** : L'ajout de nouveaux domaines métier (par exemple pour les urgences) ne nécessite pas de refonte globale, seulement la création d'une nouvelle étoile.
+
+**Gouvernance** : Chaque étoile peut avoir ses propres règles de gestion, niveaux d'accès et responsables métier.
+
+Nous avons donc choisi d'utiliser le modèle en **constellation**, avec des dimensions partagées (temps, localisation, établissement, patient) qui assurent la cohérence analytique entre les différents domaines.
+
+### 3.2. Description détaillée des étoiles
+
+#### 3.2.1. Étoile Consultation
+
+**Table de faits : fait_consultation**
+
+Grain : Une ligne par consultation individuelle
+
+**Mesures quantitatives :**
+- Nombre de consultations (métrique de volume)
+- Durée de consultation en minutes
+- Heure de début et heure de fin
+- Nombre de consultations par période
+
+**Dimensions associées :**
+- **dim_patient** : Identité et caractéristiques du patient
+- **dim_professionnel** : Praticien ayant effectué la consultation
+- **dim_specialite** : Spécialité médicale
+- **dim_diagnostic** : Diagnostic(s) posé(s) lors de la consultation
+- **dim_mutuelle** : Organisme de couverture santé
+- **dim_temps** : Décomposition temporelle complète
+- **dim_etablissement** : Lieu de consultation
+
+![Étoile consultation](<images/etoiles/Etoile consultation.png>)
+
+#### 3.2.2. Étoile Hospitalisation
+
+**Table de faits : fait_hospitalisation**
+
+Grain : Une ligne par séjour hospitalier
+
+**Mesures quantitatives :**
+- Nombre d'hospitalisations
+- Durée de séjour en jours
+- Nombre d'hospitalisations distinctes par patient
+
+**Dimensions associées :**
+- **dim_patient** : Patient hospitalisé
+- **dim_diagnostic** : Diagnostic principal du séjour
+- **dim_etablissement** : Établissement d'hospitalisation
+- **dim_localisation** : Localisation géographique
+- **dim_temps** : Date d'admission/sortie
+
+![Étoile hospitalisation](<images/etoiles/Etoile hospitalisation.png>)
+
+#### 3.2.3. Étoile Décès
+
+**Table de faits : fait_deces**
+
+Grain : Une ligne par décès enregistré
+
+**Mesures quantitatives :**
+- Nombre de décès
+- Âge au décès
+- Code et numéro d'acte de décès
+
+**Dimensions associées :**
+- **dim_patient** : Identité du défunt (avec hash sécurité sociale pour RGPD)
+- **dim_localisation** : Lieu du décès
+- **dim_temps** : Date du décès
+
+![Étoile décès](<images/etoiles/Etoile deces.png>)
+
+#### 3.2.4. Étoile Satisfaction
+
+**Table de faits : fait_satisfaction**
+
+Grain : Une ligne par enquête de satisfaction (agrégation établissement/période)
+
+**Mesures quantitatives :**
+- Score global de satisfaction (sur 100)
+- Scores détaillés : accueil, personnel infirmier, personnel médical, repas, chambre, sortie
+- Taux de recommandation (%)
+- Nombre de réponses (pour pondération statistique)
+- Classement relatif et évolution
+
+**Dimensions associées :**
+- **dim_etablissement** : Établissement évalué
+- **dim_localisation** : Localisation géographique
+- **dim_temps** : Période d'enquête
+
+![Étoile satisfaction](<images/etoiles/Etoiles satisfaction.png>)
+
+#### 3.2.5. Étoile Qualité des soins
+
+**Table de faits : fait_qualite_soins**
+
+Grain : Une ligne par indicateur qualité/établissement/période
+
+**Mesures quantitatives :**
+- Ratio ETE_ORTHO (infections post-opératoires orthopédiques)
+- Nombre d'alertes qualité
+- Taux ISO (infections du site opératoire)
+- Ratios ISO par spécialité
+- Évolution par rapport à la période précédente
+
+**Dimensions associées :**
+- **dim_etablissement** : Établissement évalué
+- **dim_localisation** : Localisation géographique
+- **dim_temps** : Période de mesure
+
+![Étoile qualité soins](<images/etoiles/Etoile qualite soins.png>)
+
+### 3.3. Dimensions partagées
+
+#### dim_temps – La dimension temporelle
+
+**Clé primaire :** sk_temps (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Date complète
+- Décompositions : jour, mois, trimestre, semestre, année
+- Semaine dans l'année (numéro ISO)
+- Jour de la semaine (1=lundi, 7=dimanche)
+- Libellés : nom du jour, nom du mois
+- Indicateurs booléens : weekend, jour férié
+- Saison (Printemps, Été, Automne, Hiver)
+
+**Stratégie d'alimentation :** Table de référence pré-générée pour la période 2015-2024, alimentation unique lors de l'initialisation.
+
+#### dim_localisation – La dimension géographique
+
+**Clé primaire :** sk_localisation (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Code lieu (code INSEE ou code postal)
+- Nom de la commune
+- Code postal
+- Ville
+- Département (code et nom)
+- Région (code et nom)
+- Pays
+- Type de lieu (classification)
+- Coordonnées GPS (latitude, longitude) pour cartographie
+
+**Stratégie d'alimentation :** Import initial depuis le référentiel INSEE des communes, avec mise à jour annuelle pour suivre les évolutions administratives (par exemple en cas de fusions de communes).
+
+#### dim_etablissement – Les établissements de santé
+
+**Clé primaire :** sk_etablissement (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Numéro FINESS (identifiant national unique)
+- Nom de l'établissement
+- Type d'établissement (CHU, clinique, EHPAD, etc.)
+- Catégorie (Public/Privé)
+- Localisation : région, département, adresse complète
+- Date de chargement (traçabilité)
+
+**Stratégie d'alimentation :** Import mensuel depuis le fichier FINESS national.
+
+#### dim_patient – Les patients
+
+**Clé primaire :** sk_patient (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Identifiant patient fonctionnel
+- Nom, prénom
+- Sexe
+- Date de naissance
+- Âge (calculé)
+- Tranche d'âge (0-18, 18-35, 35-50, 50-65, 65-80, 80+)
+- Groupe sanguin
+- Poids, taille
+- Localisation : code postal, ville, pays
+- Numéro de sécurité sociale (hashé SHA-256 pour conformité RGPD)
+- Dates de chargement et modification (traçabilité)
+
+**Stratégie d'alimentation :** Extraction mensuelle depuis PostgreSQL source.
+
+**Conformité RGPD :** Le numéro de sécurité sociale est hashé, les données nominatives sont chiffrées en environnement de production, durée de rétention limitée à 10 ans après dernier contact.
+
+#### dim_professionnel – Les professionnels de santé
+
+**Clé primaire :** sk_professionnel (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Identifiant RPPS (Répertoire Partagé des Professionnels de Santé)
+- Civilité, nom, prénom
+- Profession (médecin, infirmier, etc.)
+- Catégorie professionnelle
+- Spécialité (FK vers dim_specialite)
+- Mode d'exercice (libéral, salarié, mixte)
+- Organisation d'appartenance
+- Dates de validité (début, fin)
+- Statut actuel (actif/inactif)
+
+**Stratégie d'alimentation :** Extraction mensuelle depuis la base source, avec jointure sur le référentiel des établissements.
+
+#### dim_diagnostic – Les diagnostics médicaux
+
+**Clé primaire :** sk_diagnostic (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Code diagnostic (interne ou CIM-10)
+- Libellé du diagnostic
+- Catégorie CIM-10 (classification niveau 1)
+- Chapitre CIM-10 (classification niveau 2)
+- Source de la donnée
+- Date de chargement
+
+**Stratégie d'alimentation :** Fusion de multiples sources (fichiers CSV, base PostgreSQL).
+
+#### dim_specialite – Les spécialités médicales
+
+**Clé primaire :** sk_specialite (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Code spécialité
+- Fonction (ex: Cardiologue, Pédiatre)
+- Spécialité complète
+- Catégorie de spécialité
+- Date de chargement
+
+**Stratégie d'alimentation :** Table de référence stable, alimentée initialement puis mise à jour ponctuellement en cas d'évolution des spécialités médicales officielles.
+
+#### dim_mutuelle – Les organismes de couverture santé
+
+**Clé primaire :** sk_mutuelle (clé substitut auto-incrémentée)
+
+**Attributs descriptifs :**
+- Identifiant mutuelle
+- Nom de la mutuelle
+- Adresse complète
+- Type de mutuelle (complémentaire, obligatoire)
+- Date de chargement
+
+**Stratégie d'alimentation :** Import initial depuis fichier source, mise à jour trimestrielle pour suivre les évolutions de mutuelles.
+
+### 3.4. Passage au Modèle Logique de Données (MLD)
+
+Nous avons réalisé un MLD à partir des différents modèles en étoile.
+
+**Principes de conception :**
+
+**Clés substituts** : Toutes les dimensions utilisent des clés artificielles (sk_*) de type bigint auto-incrémentées. Cette approche garantit l'indépendance vis-à-vis des identifiants fonctionnels et la stabilité des clés même en cas de modifications métier.
+
+**Gestion des relations multiples** : Les relations de cardinalité N:N (par exemple fait_consultation vers dim_diagnostic pour gérer les diagnostics multiples) sont gérées via des colonnes de clés étrangères nullables ou des tables d'association dédiées selon la volumétrie attendue.
+
+**Dénormalisation contrôlée** : Les dimensions sont volontairement dénormalisées (exemple : région incluse directement dans dim_localisation) pour simplifier les requêtes analytiques et optimiser les performances de lecture, conformément aux principes de modélisation dimensionnelle.
+
+**Types de données optimisés** :
+- Clés primaires et étrangères : bigint (8 octets, support de volumes importants)
+- Textes : varchar avec tailles adaptées au contenu
+- Décimaux : decimal pour les ratios et pourcentages (précision garantie)
+- Compteurs : int ou bigint selon les volumes attendus
+- Dates : type date pour les dates pures, timestamp pour la traçabilité des chargements
+
+**Contraintes d'intégrité** :
+- NOT NULL systématique sur toutes les clés primaires
+- NOT NULL sur les clés étrangères obligatoires, NULL autorisé sur les FK optionnelles
+- Contraintes d'intégrité référentielle (FOREIGN KEY) pour garantir la cohérence
+- Index automatiques sur les clés primaires et étrangères
+
+**Traçabilité** : Chaque table comporte un champ date_chargement (timestamp) permettant l'audit des chargements et la détection d'anomalies.
 
 ![MLD constellation](images/mld/MLD.png)
 
+### 3.5. Description conceptuelle des flux de données
+
+Notre architecture de traitement suit une approche ELT structurée en plusieurs phases logiques :
+
+#### Phase 1 : Ingestion des données sources
+
+**Sources CSV/Excel** : Lecture des fichiers patients, diagnostics, lexiques IPAQSS et autres référentiels médicaux. Conservation de l'intégrité des données sources sans transformation.
+
+**Source PostgreSQL** : Extraction des tables consultations, hospitalisations, professionnels depuis la base de données opérationnelle. Mode incrémental basé sur les dates de modification pour optimiser les volumes.
+
+**Source FTP** : Téléchargement des fichiers ESATIS (satisfaction) et du registre national des décès depuis les serveurs gouvernementaux. Archivage systématique pour traçabilité.
+
+#### Phase 2 : Nettoyage et normalisation
+
+**Objectif** : Produire des données propres et homogènes avant intégration.
+
+**Transformations appliquées** :
+- Uniformisation de l'encodage en UTF-8
+- Suppression des doublons stricts
+- Normalisation des formats de dates (ISO 8601)
+- Standardisation des codes géographiques
+- Gestion des valeurs nulles et aberrantes
+- Validation des contraintes métier
+
+#### Phase 3 : Construction des dimensions
+
+**Dimensions de référence** : Génération ou import des dimensions stables (temps, localisation, spécialités) qui serviront de référentiel pour toute l'analyse.
+
+**Dimensions métier** : Construction des dimensions patient, professionnel, diagnostic, établissement, mutuelle par extraction, déduplication et enrichissement des données sources.
+
+**Génération des clés substituts** : Attribution d'identifiants techniques uniques (sk_*) pour chaque enregistrement de dimension, indépendamment des identifiants fonctionnels.
+
+#### Phase 4 : Construction des tables de faits
+
+**Principe** : Jointure des données sources nettoyées avec les dimensions pour récupérer les clés substituts et constituer les tables de faits.
+
+**Fait consultation** : Agrégation des consultations individuelles avec résolution des FK vers patient, professionnel, diagnostic, mutuelle, temps, établissement.
+
+**Fait hospitalisation** : Construction des séjours avec calcul de la durée et résolution des FK vers patient, diagnostic, établissement, localisation, temps.
+
+**Fait décès** : Intégration du registre des décès avec matching sur dim_patient (nom/prénom/date naissance), calcul de l'âge au décès.
+
+**Fait satisfaction** : Agrégation des enquêtes ESATIS par établissement et période, calcul des scores moyens par catégorie.
+
+**Fait qualité des soins** : Fusion des indicateurs IPAQSS (RCP, DPA, ETE_ORTHO), calcul des ratios et alertes.
+
+#### Phase 5 : Publication dans le Data Warehouse
+
+**Export PostgreSQL** : Transfert des dimensions et faits depuis la zone de transformation (DuckDB) vers le warehouse final (PostgreSQL) avec gestion de l'incrémental et du mode upsert.
+
+**Création des datamarts** : Génération de vues matérialisées pré-agrégées optimisées pour les cas d'usage Power BI :
+- Synthèse des consultations par période/spécialité/établissement
+- KPI hospitaliers (DMS, taux d'occupation)
+- Analyses de mortalité démographiques et géographiques
+- Évolution temporelle de la satisfaction
+- Benchmarking qualité inter-établissements
+
+#### Orchestration et fréquences
+
+**Orchestration Airflow** : L'ensemble des flux est orchestré via Apache Airflow avec gestion des dépendances, monitoring et alerting.
+
+**Fréquences de chargement** :
+- Données quotidiennes : consultations, hospitalisations (incrémental)
+- Données mensuelles : satisfaction, décès, référentiels (complet)
+- Rechargement complet : mensuel le premier dimanche du mois
+
+**Gestion des erreurs** : Mécanisme de retry automatique, alerting en cas d'échec, logs détaillés pour debugging.
+
 ---
 
-## 4. Pré-requis : Dimensions et Faits
-La modélisation repose sur une architecture ELT structurée en plusieurs zones au sein du datalake DuckDB, puis dans PostgreSQL :
-```
-/duckdb
-  /raw          → ingestion brute (CSV, PostgreSQL, FTP)
-  /staging      → nettoyage et normalisation
-  /ods          → jointures et constitution des dimensions et faits
-  /dwh          → données prêtes à l'export
-/Postgres
-  /datawarehouse → tables décisionnelles
-  /datamart      → vues agrégées pour la BI
-```
+## 4. Architecture des données dans le datalake
 
-### Dimensions principales
-**Patient**
-Sélection de champs pertinents, création d'une clé substitut sk_patient.
-Alimentation mensuelle.
+Notre architecture repose sur une séparation logique en quatre zones au sein de DuckDB, suivie d'une zone finale dans PostgreSQL. Cette structuration en couches garantit la traçabilité, la qualité des données et la performance.
 
-**Professionnel**
-Jointure avec établissements, clé sk_professionnel.
-Alimentation mensuelle.
+### 4.1. Zone RAW – Données brutes
 
-**Diagnostic**
-Fusion de plusieurs sources, standardisation, clé sk_diagnostic.
-Alimentation mensuelle.
+**Objectif** : Conservation des données dans leur format d'origine, sans aucune transformation.
 
-**Localisation**
-Normalisation géographique, création de sk_localisation.
-Alimentation ponctuelle.
+**Contenu** :
+- Fichiers CSV bruts (encodage d'origine préservé)
+- Extractions PostgreSQL
+- Fichiers FTP téléchargés
 
-**Temps**
-Génération interne, dérivation d'attributs temporels, sk_temps.
-Alimentation ponctuelle.
+**Rétention** : 90 jours (permettant les rejeux en cas d'erreur de transformation)
 
-**Autres dimensions**
-Établissements, spécialités, mutuelles.
+**Principe** : Cette zone est en lecture seule après chargement. Elle sert de source de vérité pour l'audit et le debugging. Aucune modification n'est autorisée.
 
-### Tables de faits
-- **Consultation** : nombre, durée, répartition temporelle.
-- **Hospitalisation** : volumes, durées, diagnostics.
-- **Décès** : volumes, âge, localisation.
-- **Satisfaction** : scores globaux et par service.
-- **Qualité des soins** : ratios et évolution.
+### 4.2. Zone STAGING – Données nettoyées
 
-### Méthodologie de chargement
-1. Ingestion brute dans /raw orchestrée par Airflow.
-2. Nettoyage dans /staging via Python.
-3. Constitution dans /ods avec DuckDB et DBT.
-4. Export vers PostgreSQL dans /dwh.
-5. Création de datamarts pour Power BI.
+**Objectif** : Normalisation et nettoyage des données avant intégration.
+
+**Transformations appliquées** :
+- Uniformisation de l'encodage
+- Suppression des doublons
+- Normalisation des formats
+- Validation des contraintes métier
+- Gestion des valeurs nulles
+
+**Rétention** : 30 jours
+
+**Principe** : Zone technique intermédiaire, non exposée aux utilisateurs finaux. Les données sont propres mais pas encore structurées en modèle dimensionnel.
+
+### 4.3. Zone ODS – Operational Data Store
+
+**Objectif** : Données structurées en modèle dimensionnel, prêtes à l'analyse.
+
+**Contenu** :
+- Toutes les tables de dimensions avec clés substituts
+- Toutes les tables de faits avec FK résolues
+- Jointures réalisées
+- Métriques calculées
+
+**Rétention** : 1 an (historisation complète)
+
+**Principe** : Zone de travail principale pour les analystes. Peut être requêtée directement avec DuckDB pour des analyses exploratoires rapides sans impacter le warehouse de production.
+
+### 4.4. Zone DWH – Data Warehouse final
+
+**Localisation** : PostgreSQL schema `datawarehouse`
+
+**Objectif** : Entrepôt de données pérenne et performant pour la Business Intelligence.
+
+**Contenu** :
+- Export complet de l'ODS
+- Optimisations PostgreSQL (indexation, statistiques)
+- Contraintes d'intégrité renforcées
+
+**Rétention** : Indéfinie (avec archivage froid au-delà de 5 ans)
+
+**Principe** : Source de vérité unique pour Power BI et tous les outils décisionnels. Garantit la cohérence des analyses entre tous les utilisateurs.
+
+### 4.5. Zone DATAMART – Vues métier
+
+**Localisation** : PostgreSQL schema `datamart`
+
+**Objectif** : Vues matérialisées pré-agrégées optimisées pour des cas d'usage spécifiques.
+
+**Contenu** :
+- Agrégations pré-calculées par dimension métier
+- Indicateurs complexes pré-calculés
+- Jointures fréquentes matérialisées
+
+**Principe** : Amélioration significative des performances des dashboards Power BI en évitant les agrégations à la volée sur des millions de lignes. Actualisation programmée selon les besoins métier.
 
 ---
 
-## 5. Utilisation des contextes
-La gestion des contextes et paramètres est assurée par Airflow et DBT, remplaçant les contextes Talend/Cloudera par une approche plus souple et maintenable.
+## 5. Gestion des environnements et paramètres
 
-**Airflow** : les connexions (PostgreSQL, FTP, chemins du datalake) sont stockées sous forme de variables sécurisées et utilisées dynamiquement dans les DAG.
+Nous avons remplacé l'approche classique des contextes Talend par une gestion moderne via Airflow et DBT, offrant plus de souplesse et de maintenabilité.
 
-**DBT** : le fichier profiles.yml définit les environnements (DuckDB, PostgreSQL) et permet de basculer entre dev/test/prod sans modifier le code.
+### 5.1. Principes de gestion des environnements
 
-**Workflows** : les variables sont utilisées dans les tâches pour paramétrer chemins, périodes de chargement et environnements.
-Cette méthode assure une séparation claire entre configuration et logique, une meilleure traçabilité et une maintenance facilitée, tout en répondant pleinement aux exigences liées à l'utilisation de contextes.
+**Séparation configuration/code** : Le code de traitement reste générique et identique entre les environnements. Seule la configuration change (chemins, connexions, paramètres).
+
+**Versionnement** : Les configurations sont versionnées dans Git (hors credentials sensibles) pour garantir la traçabilité des modifications.
+
+**Sécurisation** : Les credentials (mots de passe, clés API) ne sont jamais stockés en clair. Ils sont chiffrés dans la base de métadonnées Airflow et injectés dynamiquement à l'exécution.
+
+### 5.2. Environnements définis
+
+**Développement (DEV)** : Environnement local sur DuckDB, avec données échantillonnées. Permet les tests rapides sans impact sur la production.
+
+**Test (TEST)** : Environnement partagé sur DuckDB, avec un jeu de données représentatif. Utilisé pour les tests d'intégration et la validation métier.
+
+**Production (PROD)** : Environnement PostgreSQL final, avec l'ensemble des données historiques. Accès restreint, sauvegardes quotidiennes.
+
+### 5.3. Paramétrage centralisé
+
+**Variables d'orchestration Airflow** : Toutes les configurations sont stockées de manière centralisée dans Airflow :
+- Connexions aux bases de données (source et cible)
+- Chemins du datalake (raw, staging, ods)
+- Paramètres FTP
+- Seuils de qualité
+- Périodes de chargement
+
+**Profils DBT** : Les environnements de transformation sont définis dans le fichier de configuration DBT, permettant de basculer facilement entre dev/test/prod sans modification de code.
+
+**Injection dynamique** : Les paramètres sont injectés dynamiquement dans les jobs au moment de l'exécution, garantissant que chaque environnement utilise sa propre configuration.
+
+### 5.4. Avantages de notre approche
+
+**Maintenabilité** : Une seule source de vérité pour la configuration, facilitant les modifications et réduisant les erreurs.
+
+**Auditabilité** : Toutes les modifications de paramètres sont tracées et historisées dans Airflow.
+
+**Flexibilité** : Possibilité de modifier les paramètres sans redéploiement du code, accélérant les ajustements opérationnels.
+
+**Sécurité** : Chiffrement des credentials, principe du moindre privilège, séparation stricte des environnements.
+
+Cette approche répond pleinement aux exigences du cahier des charges concernant l'utilisation de contextes, tout en apportant une modernité et une robustesse supérieures aux solutions traditionnelles.
 
 ---
 
 ## Conclusion
-Ce livrable établit les bases techniques et organisationnelles nécessaires à la construction d'un système décisionnel moderne pour le groupe CHU. L'approche retenue repose sur une stack légère et performante, une modélisation adaptée aux besoins métiers, une orchestration automatisée et une restitution sécurisée et interactive. Elle remplace avantageusement une stack Big Data classique par une architecture plus agile, tout en respectant les objectifs pédagogiques et analytiques du projet.
+
+Ce premier livrable établit les fondations solides de notre projet Cloud Healthcare Unit. Nous avons :
+
+**Justifié nos choix technologiques** : Notre stack moderne (DuckDB, DBT, Airflow, PostgreSQL, Power BI) offre un excellent compromis entre simplicité, performance et maintenabilité, parfaitement adaptée à nos volumes et contraintes.
+
+**Modélisé notre entrepôt en constellation** : Cinq étoiles métier distinctes avec des dimensions partagées, garantissant à la fois la cohérence analytique et l'évolutivité de la solution.
+
+**Conçu une architecture en couches** : Du raw au datamart, notre architecture assure la traçabilité, la qualité et la performance des données.
+
+**Défini nos flux de données** : Une approche ELT structurée couvrant l'ensemble de la chaîne, de l'ingestion à la publication des datamarts.
+
+**Mis en place une gestion rigoureuse des environnements** : Via Airflow et DBT, nous garantissons la séparation configuration/code et la sécurité des accès.
