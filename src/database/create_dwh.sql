@@ -5,6 +5,14 @@
 -- ============================================
 
 -- ============================================
+-- CRÉATION DU SCHÉMA DWH
+-- ============================================
+
+CREATE SCHEMA IF NOT EXISTS dwh;
+CREATE SCHEMA IF NOT EXISTS mart;
+SET search_path TO dwh, public;
+
+-- ============================================
 -- SUPPRESSION DES TABLES (si elles existent)
 -- ============================================
 
