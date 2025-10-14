@@ -1,0 +1,181 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Données brutes chargées depuis PostgreSQL et CSV"
+    schema: raw
+    tables:
+      # ========================================
+      # Tables PostgreSQL (système hospitalier)
+      # ========================================
+      
+      - name: aaaa
+        description: "Table AAAA (164k lignes)"
+      
+      - name: patient
+        description: "Patients du système hospitalier (100k patients)"
+      
+      - name: professionnel_de_sante
+        description: "Professionnels de santé (1M+ professionnels)"
+      
+      - name: consultation
+        description: "Consultations médicales (1M+ consultations)"
+      
+      - name: prescription
+        description: "Prescriptions médicales (2M+ prescriptions)"
+      
+      - name: medicaments
+        description: "Référentiel des médicaments (15k médicaments)"
+      
+      - name: diagnostic
+        description: "Diagnostics médicaux (15k diagnostics)"
+      
+      - name: laboratoire
+        description: "Résultats de laboratoire (677 résultats)"
+      
+      - name: salle
+        description: "Salles de l'hôpital (201k salles)"
+      
+      - name: mutuelle
+        description: "Mutuelles des patients (254 mutuelles)"
+      
+      - name: adher
+        description: "Adhésions aux mutuelles (193k adhésions)"
+      
+      - name: specialites
+        description: "Spécialités médicales"
+      
+      - name: date
+        description: "Dimension dates (164k dates)"
+      
+      # ========================================
+      # Tables CSV - Décès
+      # ========================================
+      
+      - name: deces_en_france_deces
+        description: "Données de décès en France (25M+ décès)"
+      
+      # ========================================
+      # Tables CSV - Établissements de santé
+      # ========================================
+      
+      - name: etablissement_de_sante_etablissement_sante
+        description: "Établissements de santé (416k établissements)"
+      
+      - name: etablissement_de_sante_professionnel_sante
+        description: "Professionnels de santé des établissements (1M+ professionnels)"
+      
+      - name: etablissement_de_sante_activite_professionnel_sante
+        description: "Activités des professionnels de santé (1.8M+ activités)"
+      
+      # ========================================
+      # Tables CSV - Hospitalisations
+      # ========================================
+      
+      - name: hospitalisation_hospitalisations
+        description: "Données d'hospitalisation (2.5k hospitalisations)"
+      
+      # ========================================
+      # Tables CSV - Satisfaction 2014
+      # ========================================
+      
+      - name: satisfaction_2014_dpa_ssr_recueil2014_donnee2013_table_es
+        description: "DPA SSR 2014 - Données établissements (707 lignes)"
+      
+      - name: satisfaction_2014_dpa_ssr_recueil2014_donnee2013_table_lexique
+        description: "DPA SSR 2014 - Lexique (9 lignes)"
+      
+      - name: satisfaction_2014_dpa_ssr_recueil2014_donnee2013_table_participant
+        description: "DPA SSR 2014 - Participants (625 lignes)"
+      
+      - name: satisfaction_2014_rcp_mco_recueil2014_donnee2013_table_es
+        description: "RCP MCO 2014 - Données établissements (304 lignes)"
+      
+      - name: satisfaction_2014_rcp_mco_recueil2014_donnee2013_table_lexique
+        description: "RCP MCO 2014 - Lexique (2 lignes)"
+      
+      - name: satisfaction_2014_rcp_mco_recueil2014_donnee2013_table_participant
+        description: "RCP MCO 2014 - Participants (303 lignes)"
+      
+      # ========================================
+      # Tables CSV - Satisfaction 2015
+      # ========================================
+      
+      - name: satisfaction_2015_hpp_mco_recueil2015_donnee2014_lexique
+        description: "HPP MCO 2015 - Lexique (9 lignes)"
+      
+      - name: satisfaction_2015_hpp_mco_recueil2015_donnee2014_tables_es
+        description: "HPP MCO 2015 - Données établissements (299 lignes)"
+      
+      - name: satisfaction_2015_idm_mco_recueil2015_donnee2014_tables_es
+        description: "IDM MCO 2015 - Données établissements (221 lignes)"
+      
+      # ========================================
+      # Tables CSV - Satisfaction 2016
+      # ========================================
+      
+      - name: satisfaction_2016_dan_mco_recueil2016_donnee2015_donnees
+        description: "DAN MCO 2016 - Données (vide)"
+      
+      - name: satisfaction_2016_dan_mco_recueil2016_donnee2015_lexique
+        description: "DAN MCO 2016 - Lexique (8 lignes)"
+      
+      - name: satisfaction_2016_dpa_had_recueil2016_donnee2015_donnees
+        description: "DPA HAD 2016 - Données (vide)"
+      
+      - name: satisfaction_2016_dpa_had_recueil2016_donnee2015_lexique
+        description: "DPA HAD 2016 - Lexique (18 lignes)"
+      
+      # ========================================
+      # Tables CSV - Satisfaction 2017-2018
+      # ========================================
+      
+      - name: satisfaction_2017_2018_dpa_ssr_recueil2018_donnee2017_donnees
+        description: "DPA SSR 2017-2018 - Données (vide)"
+      
+      - name: satisfaction_2017_2018_dpa_ssr_recueil2018_donnee2017_lexique
+        description: "DPA SSR 2017-2018 - Lexique (11 lignes)"
+      
+      - name: satisfaction_2017_2018_ete_ortho_ipaqss_2017_2018_donnees
+        description: "ETE ORTHO IPAQSS 2017-2018 - Données (457 lignes)"
+      
+      - name: satisfaction_2017_2018_ete_ortho_ipaqss_2017_2018_lexique
+        description: "ETE ORTHO IPAQSS 2017-2018 - Lexique (4 lignes)"
+      
+      - name: satisfaction_2017_2018_rcp_mco_recueil2018_donnee2017_donnees
+        description: "RCP MCO 2017-2018 - Données (vide)"
+      
+      - name: satisfaction_2017_2018_rcp_mco_recueil2018_donnee2017_lexique
+        description: "RCP MCO 2017-2018 - Lexique (7 lignes)"
+      
+      # ========================================
+      # Tables CSV - Satisfaction 2019
+      # ========================================
+      
+      - name: satisfaction_2019_lexique_esatis48h_mco_open_data_2019
+        description: "E-SATIS 48h MCO 2019 - Lexique (4 lignes)"
+      
+      - name: satisfaction_2019_lexique_esatisca_mco_open_data_2019
+        description: "E-SATIS CA MCO 2019 - Lexique (4 lignes)"
+      
+      - name: satisfaction_2019_lexique_iqss_open_data_2019
+        description: "IQSS 2019 - Lexique (14 lignes)"
+      
+      - name: satisfaction_2019_resultats_esatis48h_mco_open_data_2019
+        description: "E-SATIS 48h MCO 2019 - Résultats (810 lignes)"
+      
+      - name: satisfaction_2019_resultats_esatisca_mco_open_data_2019
+        description: "E-SATIS CA MCO 2019 - Résultats (704 lignes)"
+      
+      - name: satisfaction_2019_resultats_iqss_open_data_2019
+        description: "IQSS 2019 - Résultats (vide)"
+      
+      # ========================================
+      # Tables CSV - Satisfaction 2017 (autres)
+      # ========================================
+      
+      - name: satisfaction_esatis48h_mco_recueil2017_donnees
+        description: "E-SATIS 48h MCO 2017 - Données (875 lignes)"
+      
+      - name: satisfaction_esatis48h_mco_recueil2017_lexique
+        description: "E-SATIS 48h MCO 2017 - Lexique (4 lignes)"

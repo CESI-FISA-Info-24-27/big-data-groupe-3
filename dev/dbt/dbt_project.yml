@@ -1,0 +1,57 @@
+name: 'chu_datawarehouse'
+version: '1.0.0'
+config-version: 2
+
+profile: 'chu_dwh'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  chu_datawarehouse:
+    # STAGING : Nettoyage et normalisation (1 modèle = 1 table raw)
+    staging:
+      +materialized: table
+      +tags: ['staging']
+    
+    # ODS : Intégration et règles métier (jointures, enrichissements)
+    ods:
+      +materialized: table
+      +tags: ['ods', 'core']
+      
+    # INTERMEDIATE : Modèles éphémères pour calculs intermédiaires
+    intermediate:
+      +materialized: ephemeral
+      
+    # MARTS : Data Warehouse dimensionnel (étoile/flocon)
+    marts:
+      dwh:
+        +materialized: table
+        +schema: dwh
+        dimensions:
+          +tags: ['dimension']
+        facts:
+          +tags: ['fact']
+          +partition_by:
+            field: date_evenement
+            data_type: date
+            granularity: month
+      
+      datamart:
+        +materialized: table
+        +tags: ['datamart']
+
+seeds:
+  +schema: seeds
+
+vars:
+  current_year: 2025

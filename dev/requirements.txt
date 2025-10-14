@@ -1,0 +1,24 @@
+# Dépendances Python pour le projet chu-datawarehouse
+
+# DuckDB - Base de données analytique embarquée
+duckdb>=0.9.0
+
+# DBT
+dbt-core>=1.7.0
+dbt-duckdb>=1.7.0
+
+# Data processing
+pandas>=2.0.0
+
+# PostgreSQL
+psycopg2-binary>=2.9.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# CLI utilities
+click>=8.1.0
+
+# Optional: pour le monitoring et logging
+tqdm>=4.65.0
+

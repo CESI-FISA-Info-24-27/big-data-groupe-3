@@ -1,0 +1,251 @@
+version: 2
+
+models:
+  # ========================================
+  # DIMENSIONS
+  # ========================================
+  
+  - name: dim_temps
+    description: "Dimension temporelle générée (2015-2030) avec jours fériés français"
+    columns:
+      - name: sk_temps
+        description: "Clé substitut (format YYYYMMDD)"
+        tests:
+          - unique
+          - not_null
+      - name: date_complete
+        description: "Date complète"
+        tests:
+          - unique
+          - not_null
+      - name: est_ferie
+        description: "Jour férié français (TRUE/FALSE)"
+      - name: est_weekend
+        description: "Weekend (samedi/dimanche)"
+  
+  - name: dim_specialite
+    description: "Dimension spécialités médicales (93 spécialités, 30+ catégories)"
+    columns:
+      - name: sk_specialite
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: code_specialite
+        description: "Code spécialité (business key)"
+        tests:
+          - unique
+          - not_null
+      - name: categorie
+        description: "Catégorie de spécialité (Medecine generale, Soins infirmiers, etc.)"
+  
+  - name: dim_mutuelle
+    description: "Dimension mutuelles (254 organismes)"
+    columns:
+      - name: sk_mutuelle
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: id_mut
+        description: "ID mutuelle (business key)"
+        tests:
+          - unique
+          - not_null
+      - name: type_mutuelle
+        description: "Type (CMU, Assurance, Mutuelle)"
+  
+  - name: dim_diagnostic
+    description: "Dimension diagnostics CIM-10 (15k codes avec 21 chapitres)"
+    columns:
+      - name: sk_diagnostic
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: code_diagnostic
+        description: "Code CIM-10 (business key)"
+        tests:
+          - unique
+          - not_null
+      - name: chapitre_cim10
+        description: "Chapitre CIM-10 (21 chapitres mappés)"
+  
+  - name: dim_localisation
+    description: "Dimension géographique consolidée (50k localisations, 13 régions)"
+    columns:
+      - name: sk_localisation
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: code_lieu
+        description: "Code postal ou code INSEE"
+      - name: region
+        description: "Région française (13 régions + Outre-mer)"
+      - name: departement
+        description: "Département (avec Corse 2A/2B)"
+  
+  - name: dim_etablissement
+    description: "Dimension établissements de santé (416k établissements FINESS)"
+    columns:
+      - name: sk_etablissement
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: finess
+        description: "Numéro FINESS (business key)"
+        tests:
+          - unique
+          - not_null
+      - name: region
+        description: "Région (calculée depuis département)"
+  
+  - name: dim_patient
+    description: "Dimension patients (100k patients avec SHA-256 RGPD)"
+    columns:
+      - name: sk_patient
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: id_patient
+        description: "ID patient (business key)"
+        tests:
+          - unique
+          - not_null
+      - name: num_secu_hash
+        description: "Numéro sécu hashé SHA-256 (RGPD)"
+      - name: tranche_age
+        description: "Tranche d'âge (0-18, 19-30, 31-50, 51-65, 66+)"
+  
+  - name: dim_professionnel
+    description: "Dimension professionnels santé avec SCD Type 2 (1M professionnels)"
+    columns:
+      - name: sk_professionnel
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: identifiant
+        description: "RPPS/ADELI (business key)"
+        tests:
+          - not_null
+      - name: fk_specialite
+        description: "FK vers dim_specialite"
+      - name: est_actuel
+        description: "Version actuelle (SCD Type 2)"
+      - name: date_debut_validite
+        description: "Date début validité (SCD Type 2)"
+      - name: date_fin_validite
+        description: "Date fin validité (SCD Type 2, NULL si actuel)"
+  
+  # ========================================
+  # TABLES DE FAITS
+  # ========================================
+  
+  - name: fait_consultation
+    description: "Fait consultations médicales (1M consultations)"
+    columns:
+      - name: sk_fait_consultation
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: sk_patient
+        description: "FK vers dim_patient"
+        tests:
+          - not_null
+      - name: sk_professionnel
+        description: "FK vers dim_professionnel"
+        tests:
+          - not_null
+      - name: sk_diagnostic
+        description: "FK vers dim_diagnostic"
+        tests:
+          - not_null
+      - name: sk_temps
+        description: "FK vers dim_temps"
+        tests:
+          - not_null
+      - name: duree_consultation
+        description: "Durée en minutes (MESURE)"
+      - name: nombre_consultations
+        description: "Constante = 1 (MESURE)"
+  
+  - name: fait_hospitalisation
+    description: "Fait hospitalisations (2.5k séjours)"
+    columns:
+      - name: sk_fait_hospitalisation
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: sk_patient
+        description: "FK vers dim_patient"
+        tests:
+          - not_null
+      - name: sk_temps
+        description: "FK vers dim_temps"
+        tests:
+          - not_null
+      - name: jour_hospitalisation
+        description: "Durée séjour en jours (MESURE)"
+      - name: nombre_hospitalisations
+        description: "Constante = 1 (MESURE)"
+  
+  - name: fait_deces
+    description: "Fait décès (25M décès INSEE avec fuzzy matching patient)"
+    columns:
+      - name: sk_fait_deces
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: sk_patient
+        description: "FK vers dim_patient (NULL si pas de match)"
+      - name: sk_temps
+        description: "FK vers dim_temps"
+        tests:
+          - not_null
+      - name: age_deces
+        description: "Âge au décès (MESURE)"
+      - name: nombre_deces
+        description: "Constante = 1 (MESURE)"
+  
+  - name: fait_satisfaction
+    description: "Fait satisfaction e-Satis par établissement et année"
+    columns:
+      - name: sk_fait_satisfaction
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: sk_etablissement
+        description: "FK vers dim_etablissement"
+        tests:
+          - not_null
+      - name: score_global
+        description: "Score global satisfaction (MESURE)"
+      - name: taux_recommandation
+        description: "% patients recommandent (MESURE)"
+  
+  - name: fait_qualite_soins
+    description: "Fait qualité soins IPAQSS par établissement et année"
+    columns:
+      - name: sk_fait_qualite
+        description: "Clé substitut"
+        tests:
+          - unique
+          - not_null
+      - name: sk_etablissement
+        description: "FK vers dim_etablissement"
+        tests:
+          - not_null
+      - name: ratio_ete_ortho
+        description: "Ratio ETE ortho (MESURE)"
+      - name: alerte_ete
+        description: "Alerte ETE (0/1)"
+
+

@@ -1,0 +1,119 @@
+version: 2
+
+models:
+  - name: ods_patient_complet
+    description: "Patient enrichi avec informations mutuelle - Prépare dim_patient"
+    columns:
+      - name: id_patient
+        description: "Business Key patient"
+        tests:
+          - unique
+          - not_null
+      - name: nom_mutuelle
+        description: "Nom de la mutuelle du patient (si existe)"
+      - name: a_mutuelle_active
+        description: "Booléen - Patient a une mutuelle active"
+      - name: tranche_age
+        description: "Classification âge calculée"
+  
+  - name: ods_professionnel_complet
+    description: "Professionnel enrichi avec établissement - Prépare dim_professionnel (SCD Type 2)"
+    columns:
+      - name: identifiant
+        description: "Business Key RPPS/ADELI"
+        tests:
+          - unique
+          - not_null
+      - name: mode_exercice
+        description: "Libéral ou Salarié (calculé)"
+      - name: commune_exercice
+        description: "Commune d'exercice principal"
+      - name: nb_etablissements
+        description: "Nombre d'établissements où exerce le professionnel"
+  
+  - name: ods_consultation_enrichie
+    description: "Consultation avec patient, professionnel et diagnostic - Prépare fait_consultation"
+    columns:
+      - name: num_consultation
+        description: "ID consultation"
+        tests:
+          - unique
+          - not_null
+      - name: duree_consultation_minutes
+        description: "Durée calculée en minutes"
+      - name: categorie_patient
+        description: "PEDIATRIE / ADULTE / GERIATRIE"
+      - name: duree_categorie
+        description: "COURTE / NORMALE / LONGUE"
+  
+  - name: ods_hospitalisation_enrichie
+    description: "Hospitalisation avec patient et établissement - Prépare fait_hospitalisation"
+    columns:
+      - name: num_hospitalisation
+        description: "ID hospitalisation"
+        tests:
+          - unique
+          - not_null
+      - name: jour_hospitalisation
+        description: "Durée séjour en jours"
+      - name: type_sejour
+        description: "COURT_SEJOUR / MOYEN_SEJOUR / LONG_SEJOUR"
+      - name: categorie_patient
+        description: "PEDIATRIE / ADULTE / GERIATRIE"
+  
+  - name: ods_deces_enrichi
+    description: "Décès enrichis avec classifications - Prépare fait_deces (25M+ lignes)"
+    columns:
+      - name: numero_acte_deces
+        description: "Numéro acte de décès"
+      - name: age_deces
+        description: "Âge au moment du décès"
+      - name: tranche_age_deces
+        description: "MOINS_1_AN / ENFANT / JEUNE_ADULTE / ADULTE / SENIOR"
+      - name: sexe
+        description: "M / F / INCONNU (converti depuis code)"
+  
+  - name: ods_localisation_consolidee
+    description: "Localisations géographiques consolidées - Prépare dim_localisation"
+    columns:
+      - name: code_lieu
+        description: "Code postal ou code INSEE"
+        tests:
+          - unique
+          - not_null
+      - name: types_lieu
+        description: "Types de lieux (Patient, Etablissement, Deces...)"
+      - name: nb_occurrences
+        description: "Nombre de fois où ce lieu apparaît dans les sources"
+  
+  - name: ods_prescription_enrichie
+    description: "Prescriptions avec médicaments et consultations - 2M+ lignes"
+    columns:
+      - name: num_consultation
+        description: "FK vers consultation"
+        tests:
+          - not_null
+      - name: code_cis
+        description: "Code CIS médicament"
+        tests:
+          - not_null
+      - name: medicament_nom
+        description: "Dénomination du médicament"
+  
+  - name: ods_satisfaction_unifie
+    description: "Consolidation 31 tables satisfaction e-Satis (2014-2020) - Prépare fait_satisfaction"
+    columns:
+      - name: type_enquete
+        description: "Type enquête (E-SATIS 48h, E-SATIS CA, etc.)"
+      - name: annee_enquete
+        description: "Année de l'enquête"
+      - name: annee_donnee
+        description: "Année des données"
+  
+  - name: ods_qualite_soins_unifie
+    description: "Consolidation indicateurs qualité IQSS - Prépare fait_qualite_soins"
+    columns:
+      - name: type_indicateur
+        description: "Type indicateur (IQSS, ETE ORTHO)"
+      - name: annee_enquete
+        description: "Année de l'enquête"

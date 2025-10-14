@@ -1,7 +1,7 @@
 .env
-projet/data/*
-projet/docs/*
-projet/logs/*
+dev/data/*
+dev/docs/*
+dev/logs/*
 !data/csv/.gitkeep
 dbt/target/
 dbt/logs/

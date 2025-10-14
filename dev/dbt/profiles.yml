@@ -1,0 +1,19 @@
+chu_dwh:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../data/duckdb/staging.duckdb
+      schema: staging
+      threads: 4
+      
+    prod:
+      type: postgres
+      host: "{{ env_var('DWH_POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('DWH_POSTGRES_PORT', '5432') | int }}"
+      user: "{{ env_var('DWH_POSTGRES_USER', 'admin') }}"
+      password: "{{ env_var('DWH_POSTGRES_PASSWORD', 'admin') }}"
+      dbname: "{{ env_var('DWH_POSTGRES_DB', 'dwh') }}"
+      schema: dwh
+      threads: 4
+      keepalives_idle: 0

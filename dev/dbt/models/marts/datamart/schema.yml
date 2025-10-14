@@ -1,0 +1,208 @@
+version: 2
+
+models:
+  # ========================================
+  # DATA MARTS POUR POWER BI
+  # ========================================
+  
+  - name: dm_consultations_agregees
+    description: "Data mart optimisé pour Power BI - Consultations pré-agrégées par établissement, diagnostic, professionnel et profil patient"
+    columns:
+      - name: sk_temps
+        description: "Clé temporelle (FK vers dim_temps)"
+        tests:
+          - not_null
+      - name: annee
+        description: "Année (pour filtres Power BI)"
+      - name: trimestre
+        description: "Trimestre (Q1, Q2, Q3, Q4)"
+      - name: mois
+        description: "Mois (1-12)"
+      
+      - name: sk_etablissement
+        description: "Clé établissement (FK vers dim_etablissement)"
+      - name: nom_etablissement
+        description: "Nom établissement (pour affichage Power BI)"
+      - name: region_etablissement
+        description: "Région établissement (pour analyse territoriale)"
+      
+      - name: sk_diagnostic
+        description: "Clé diagnostic (FK vers dim_diagnostic)"
+      - name: code_diagnostic
+        description: "Code CIM-10 (pour filtres Power BI)"
+      - name: libelle_diagnostic
+        description: "Libellé diagnostic (pour affichage Power BI)"
+      - name: chapitre_cim10
+        description: "Chapitre CIM-10 (pour regroupements)"
+      
+      - name: sk_professionnel
+        description: "Clé professionnel (FK vers dim_professionnel)"
+      - name: nom_professionnel
+        description: "Nom professionnel (pour affichage Power BI)"
+      - name: specialite
+        description: "Spécialité médicale (pour regroupements)"
+      - name: fonction
+        description: "Fonction (Médecin, Infirmier, etc.)"
+      
+      - name: sexe
+        description: "Sexe patient (M/F/I)"
+      - name: tranche_age
+        description: "Tranche d'âge (0-18, 19-30, 31-50, 51-65, 66+)"
+      - name: age
+        description: "Âge exact du patient"
+      
+      # Mesures agrégées
+      - name: nb_consultations_etablissement
+        description: "Nombre total consultations par établissement"
+        tests:
+          - not_null
+      - name: duree_totale_etablissement
+        description: "Durée totale consultations par établissement (minutes)"
+      - name: nb_patients_uniques_etablissement
+        description: "Nombre patients uniques par établissement"
+      
+      - name: nb_consultations_diagnostic
+        description: "Nombre total consultations par diagnostic"
+      - name: duree_totale_diagnostic
+        description: "Durée totale consultations par diagnostic (minutes)"
+      - name: nb_patients_uniques_diagnostic
+        description: "Nombre patients uniques par diagnostic"
+      
+      - name: nb_consultations_professionnel
+        description: "Nombre total consultations par professionnel"
+      - name: duree_totale_professionnel
+        description: "Durée totale consultations par professionnel (minutes)"
+      - name: nb_patients_uniques_professionnel
+        description: "Nombre patients uniques par professionnel"
+      
+      - name: nb_consultations_profil
+        description: "Nombre total consultations par profil patient (sexe/âge)"
+      - name: duree_totale_profil
+        description: "Durée totale consultations par profil patient (minutes)"
+      - name: nb_patients_uniques_profil
+        description: "Nombre patients uniques par profil patient"
+
+  - name: dm_hospitalisations_agregees
+    description: "Data mart optimisé pour Power BI - Hospitalisations pré-agrégées par établissement, diagnostic et profil patient"
+    columns:
+      - name: sk_temps
+        description: "Clé temporelle (FK vers dim_temps)"
+        tests:
+          - not_null
+      - name: annee
+        description: "Année (pour filtres Power BI)"
+      - name: trimestre
+        description: "Trimestre (Q1, Q2, Q3, Q4)"
+      - name: mois
+        description: "Mois (1-12)"
+      
+      - name: sk_etablissement
+        description: "Clé établissement (FK vers dim_etablissement)"
+      - name: nom_etablissement
+        description: "Nom établissement (pour affichage Power BI)"
+      - name: region_etablissement
+        description: "Région établissement (pour analyse territoriale)"
+      
+      - name: sk_diagnostic
+        description: "Clé diagnostic (FK vers dim_diagnostic)"
+      - name: code_diagnostic
+        description: "Code CIM-10 (pour filtres Power BI)"
+      - name: libelle_diagnostic
+        description: "Libellé diagnostic (pour affichage Power BI)"
+      
+      - name: sexe
+        description: "Sexe patient (M/F/I)"
+      - name: tranche_age
+        description: "Tranche d'âge (0-18, 19-30, 31-50, 51-65, 66+)"
+      
+      # Mesures agrégées
+      - name: nb_hospitalisations_etablissement
+        description: "Nombre total hospitalisations par établissement"
+        tests:
+          - not_null
+      - name: duree_totale_etablissement
+        description: "Durée totale séjours par établissement (jours)"
+      - name: duree_moyenne_etablissement
+        description: "Durée moyenne séjours par établissement (jours)"
+      - name: nb_patients_uniques_etablissement
+        description: "Nombre patients uniques par établissement"
+      
+      - name: nb_hospitalisations_diagnostic
+        description: "Nombre total hospitalisations par diagnostic"
+      - name: duree_totale_diagnostic
+        description: "Durée totale séjours par diagnostic (jours)"
+      - name: duree_moyenne_diagnostic
+        description: "Durée moyenne séjours par diagnostic (jours)"
+      
+      - name: nb_hospitalisations_profil
+        description: "Nombre total hospitalisations par profil patient (sexe/âge)"
+      - name: duree_totale_profil
+        description: "Durée totale séjours par profil patient (jours)"
+      - name: duree_moyenne_profil
+        description: "Durée moyenne séjours par profil patient (jours)"
+      
+      - name: nb_hospitalisations_region
+        description: "Nombre total hospitalisations par région"
+      - name: duree_totale_region
+        description: "Durée totale séjours par région (jours)"
+      - name: duree_moyenne_region
+        description: "Durée moyenne séjours par région (jours)"
+
+  - name: dm_analyse_territoriale
+    description: "Data mart optimisé pour Power BI - Analyse territoriale avec décès par région (2019) et satisfaction par région (2020)"
+    columns:
+      - name: sk_temps
+        description: "Clé temporelle (FK vers dim_temps)"
+        tests:
+          - not_null
+      - name: annee
+        description: "Année (focus 2019 pour décès, 2020 pour satisfaction)"
+      - name: trimestre
+        description: "Trimestre (Q1, Q2, Q3, Q4)"
+      - name: mois
+        description: "Mois (1-12)"
+      
+      - name: region
+        description: "Région française (pour analyse territoriale)"
+        tests:
+          - not_null
+      
+      # Indicateurs décès
+      - name: nb_deces_region
+        description: "Nombre total décès par région"
+        tests:
+          - not_null
+      - name: nb_patients_deces_region
+        description: "Nombre patients décédés uniques par région"
+      - name: nb_deces_hommes
+        description: "Nombre décès hommes par région"
+      - name: nb_deces_femmes
+        description: "Nombre décès femmes par région"
+      - name: nb_deces_0_18
+        description: "Nombre décès 0-18 ans par région"
+      - name: nb_deces_19_30
+        description: "Nombre décès 19-30 ans par région"
+      - name: nb_deces_31_50
+        description: "Nombre décès 31-50 ans par région"
+      - name: nb_deces_51_65
+        description: "Nombre décès 51-65 ans par région"
+      - name: nb_deces_66_plus
+        description: "Nombre décès 66+ ans par région"
+      
+      # Indicateurs satisfaction
+      - name: nb_reponses_satisfaction
+        description: "Nombre total réponses satisfaction par région"
+      - name: note_moyenne_satisfaction
+        description: "Note moyenne satisfaction par région (sur échelle à définir)"
+      - name: nb_patients_satisfaction
+        description: "Nombre patients ayant répondu par région"
+      - name: nb_etablissements_satisfaction
+        description: "Nombre établissements évalués par région"
+      - name: nb_reponses_hommes
+        description: "Nombre réponses satisfaction hommes par région"
+      - name: nb_reponses_femmes
+        description: "Nombre réponses satisfaction femmes par région"
+      - name: note_moyenne_hommes
+        description: "Note moyenne satisfaction hommes par région"
+      - name: note_moyenne_femmes
+        description: "Note moyenne satisfaction femmes par région"

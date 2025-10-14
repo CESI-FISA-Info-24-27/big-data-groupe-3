@@ -1,0 +1,227 @@
+version: 2
+
+models:
+  # ========================================
+  # CORE BUSINESS - PostgreSQL
+  # ========================================
+  
+  - name: stg_patient
+    description: "Patients nettoyés et standardisés - 100k lignes - Prépare dim_patient"
+    columns:
+      - name: id_patient
+        description: "Business Key - ID patient source"
+        tests:
+          - unique
+          - not_null
+      - name: age
+        description: "Âge calculé à partir de la date de naissance"
+      - name: tranche_age
+        description: "Classification âge: 0-18, 19-30, 31-50, 51-65, 66+"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_professionnel_sante
+    description: "Professionnels de santé nettoyés - 1M+ lignes - Prépare dim_professionnel (SCD Type 2)"
+    columns:
+      - name: identifiant
+        description: "Business Key - RPPS/ADELI"
+        tests:
+          - unique
+          - not_null
+      - name: mode_exercice
+        description: "Libéral ou Salarié"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_consultation
+    description: "Consultations nettoyées - 1M+ lignes - Prépare fait_consultation"
+    columns:
+      - name: num_consultation
+        description: "ID consultation"
+        tests:
+          - unique
+          - not_null
+      - name: duree_consultation_minutes
+        description: "Durée calculée en minutes"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_prescription
+    description: "Prescriptions nettoyées - 2M+ lignes"
+    columns:
+      - name: id_consultation
+        description: "FK vers consultation"
+        tests:
+          - not_null
+      - name: id_medicament
+        description: "FK vers médicament"
+        tests:
+          - not_null
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_medicaments
+    description: "Référentiel médicaments nettoyé - 15k lignes"
+    columns:
+      - name: id_medicament
+        description: "Business Key"
+        tests:
+          - unique
+          - not_null
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_diagnostic
+    description: "Diagnostics CIM-10 nettoyés - 15k lignes - Prépare dim_diagnostic"
+    columns:
+      - name: code_diagnostic
+        description: "Business Key - Code CIM-10"
+        tests:
+          - unique
+          - not_null
+      - name: categorie_cim10
+        description: "3 premiers caractères du code CIM-10"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_mutuelle
+    description: "Mutuelles nettoyées - 254 lignes - Prépare dim_mutuelle"
+    columns:
+      - name: id_mut
+        description: "Business Key"
+        tests:
+          - unique
+          - not_null
+      - name: type_mutuelle
+        description: "Mutuelle / Assurance / CMU"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_adher
+    description: "Adhésions mutuelles nettoyées - 193k lignes"
+    columns:
+      - name: id_patient
+        description: "FK vers patient"
+        tests:
+          - not_null
+      - name: id_mut
+        description: "FK vers mutuelle"
+        tests:
+          - not_null
+      - name: statut_adhesion
+        description: "ACTIF ou INACTIF"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_specialites
+    description: "Spécialités médicales nettoyées - Prépare dim_specialite"
+    columns:
+      - name: code_specialite
+        description: "Business Key"
+        tests:
+          - unique
+          - not_null
+      - name: categorie
+        description: "Médecine générale / Médecine spécialisée / etc."
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_salle
+    description: "Salles d'hôpital nettoyées - 201k lignes"
+    columns:
+      - name: id_salle
+        description: "Business Key"
+        tests:
+          - unique
+          - not_null
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_laboratoire
+    description: "Résultats de laboratoire nettoyés - 677 lignes"
+    columns:
+      - name: id_labo
+        description: "ID laboratoire"
+        tests:
+          - unique
+          - not_null
+      - name: nom_laboratoire
+        description: "Nom du laboratoire pharmaceutique"
+      - name: pays
+        description: "Pays du laboratoire"
+  
+  # ========================================
+  # DÉCÈS - CSV
+  # ========================================
+  
+  - name: stg_deces
+    description: "Décès France nettoyés - 25M+ lignes - Prépare fait_deces"
+    columns:
+      - name: numero_acte_deces
+        description: "Numéro acte de décès"
+      - name: date_deces
+        description: "Date du décès"
+        tests:
+          - not_null
+      - name: age_deces
+        description: "Âge au moment du décès"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  # ========================================
+  # ÉTABLISSEMENTS - CSV
+  # ========================================
+  
+  - name: stg_etablissement_sante
+    description: "Établissements de santé nettoyés - 416k lignes - Prépare dim_etablissement"
+    columns:
+      - name: finess
+        description: "Business Key - Numéro FINESS"
+        tests:
+          - unique
+          - not_null
+      - name: departement
+        description: "Code département calculé depuis code postal"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_etablissement_professionnel
+    description: "Lien professionnels-établissements - 1M+ lignes"
+    columns:
+      - name: identifiant
+        description: "RPPS/ADELI professionnel"
+        tests:
+          - not_null
+      - name: finess
+        description: "FINESS établissement"
+        tests:
+          - not_null
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  - name: stg_etablissement_activite
+    description: "Activités professionnels - 1.8M+ lignes"
+    columns:
+      - name: identifiant
+        description: "RPPS/ADELI professionnel"
+        tests:
+          - not_null
+      - name: loaded_at
+        description: "Timestamp de chargement staging"
+  
+  # ========================================
+  # HOSPITALISATIONS - CSV
+  # ========================================
+  
+  - name: stg_hospitalisation
+    description: "Hospitalisations nettoyées - 2.5k lignes - Prépare fait_hospitalisation"
+    columns:
+      - name: num_hospitalisation
+        description: "ID hospitalisation"
+        tests:
+          - unique
+          - not_null
+      - name: jour_hospitalisation
+        description: "Durée séjour calculée en jours"
+      - name: loaded_at
+        description: "Timestamp de chargement staging"

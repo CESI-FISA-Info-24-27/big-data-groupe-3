@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  # Postgres DWH (destination finale)
+  postgres-dwh:
+    image: postgres:15
+    container_name: chu-dwh
+    environment:
+      POSTGRES_DB: chu_dwh
+      POSTGRES_USER: dwh_user
+      POSTGRES_PASSWORD: changeme
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-dwh-data:/var/lib/postgresql/data
+      - ./scripts/init_dwh.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  postgres-dwh-data:
