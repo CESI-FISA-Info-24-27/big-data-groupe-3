@@ -1,1 +1,15 @@
 .env
+projet/data/*
+projet/docs/*
+projet/logs/*
+!data/csv/.gitkeep
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+__pycache__/
+*.pyc
+.DS_Store
+
+duckdb/*
+duckdb.db/staging*.duckdb.old
+db.sql
