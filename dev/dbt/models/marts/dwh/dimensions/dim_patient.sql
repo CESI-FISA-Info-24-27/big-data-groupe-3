@@ -48,9 +48,15 @@ dimension_patient as (
         -- Business key
         id_patient,
         
-        -- Informations personnelles
-        nom,
-        prenom,
+        -- Informations personnelles (ANONYMISÉES pour RGPD)
+        -- Hash SHA-256 tronqué à 8 caractères pour pseudonymisation
+        substring(lower(cast(sha256(cast(nom as varchar)) as varchar)), 1, 8) as nom_anonyme,
+        substring(lower(cast(sha256(cast(prenom as varchar)) as varchar)), 1, 8) as prenom_anonyme,
+        
+        -- Option : Garder initiales seulement (moins sécurisé mais lisible)
+        -- substring(nom, 1, 1) || '***' as nom_anonyme,
+        -- substring(prenom, 1, 1) || '***' as prenom_anonyme,
+        
         sexe,
         date_naissance,
         age,

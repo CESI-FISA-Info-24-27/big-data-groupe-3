@@ -1,14 +1,21 @@
-# Dépendances Python pour le projet chu-datawarehouse
+# ============================================
+# Dépendances Python - CHU Data Warehouse
+# ============================================
 
 # DuckDB - Base de données analytique embarquée
 duckdb>=0.9.0
 
-# DBT
+# DBT - Transformation des données
 dbt-core>=1.7.0
 dbt-duckdb>=1.7.0
 
+# Apache Airflow - Orchestration du pipeline
+apache-airflow>=2.7.3
+apache-airflow-providers-postgres>=5.7.0
+
 # Data processing
 pandas>=2.0.0
+numpy>=1.24.0
 
 # PostgreSQL
 psycopg2-binary>=2.9.0
@@ -18,7 +25,11 @@ python-dotenv>=1.0.0
 
 # CLI utilities
 click>=8.1.0
+colorama>=0.4.6  # Couleurs terminal (Windows)
 
-# Optional: pour le monitoring et logging
+# Monitoring et logging
 tqdm>=4.65.0
+
+# Testing (optionnel)
+pytest>=7.4.0
 

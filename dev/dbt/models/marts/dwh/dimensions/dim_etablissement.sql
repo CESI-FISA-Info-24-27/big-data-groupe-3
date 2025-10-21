@@ -24,9 +24,35 @@ dimension_etablissement as (
         -- Informations établissement
         raison_sociale_site as nom_etablissement,
         
-        -- Type et catégorie (à enrichir si disponible dans les sources)
-        'Non renseigne' as type_etablissement,  -- TODO: À enrichir si données disponibles
-        'Non renseigne' as categorie,           -- TODO: À enrichir si données disponibles
+        -- Type établissement (classification automatique basée sur le nom)
+        case
+            when upper(raison_sociale_site) like '%CHU%' or upper(raison_sociale_site) like '%UNIVERSITAIRE%' then 'CHU'
+            when upper(raison_sociale_site) like '%CH %' or upper(raison_sociale_site) like '%HOPITAL%' or upper(raison_sociale_site) like '%HOSP%' then 'Hopital Public'
+            when upper(raison_sociale_site) like '%CLINIQUE%' then 'Clinique Privee'
+            when upper(raison_sociale_site) like '%EHPAD%' then 'EHPAD'
+            when upper(raison_sociale_site) like '%MAISON%' and upper(raison_sociale_site) like '%RETRAITE%' then 'Maison de Retraite'
+            when upper(raison_sociale_site) like '%CENTRE%' and upper(raison_sociale_site) like '%SANTE%' then 'Centre de Sante'
+            when upper(raison_sociale_site) like '%CABINET%' then 'Cabinet Medical'
+            when upper(raison_sociale_site) like '%LABORATOIRE%' or upper(raison_sociale_site) like '%LABO%' then 'Laboratoire'
+            when upper(raison_sociale_site) like '%PHARMACIE%' then 'Pharmacie'
+            when upper(raison_sociale_site) like '%CIAS%' or upper(raison_sociale_site) like '%CCAS%' then 'Centre Communal Action Sociale'
+            when upper(raison_sociale_site) like '%CONSEIL%' and upper(raison_sociale_site) like '%DEPARTEMENTAL%' then 'Conseil Departemental'
+            else 'Autre etablissement'
+        end as type_etablissement,
+        
+        -- Catégorie (Public/Privé/Médico-social)
+        case
+            when upper(raison_sociale_site) like '%CHU%' 
+                 or upper(raison_sociale_site) like '%CH %' 
+                 or upper(raison_sociale_site) like '%HOPITAL%' 
+                 or upper(raison_sociale_site) like '%CONSEIL%' then 'Public'
+            when upper(raison_sociale_site) like '%CLINIQUE%' 
+                 or upper(raison_sociale_site) like '%CABINET%' then 'Prive'
+            when upper(raison_sociale_site) like '%EHPAD%' 
+                 or upper(raison_sociale_site) like '%MAISON%' 
+                 or upper(raison_sociale_site) like '%CIAS%' then 'Medico-social'
+            else 'Non determine'
+        end as categorie,
         
         -- Mapping région par département
         case

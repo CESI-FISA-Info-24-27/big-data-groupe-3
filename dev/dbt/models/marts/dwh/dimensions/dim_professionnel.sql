@@ -26,10 +26,16 @@ dimension_professionnel as (
         -- Business key (RPPS/ADELI)
         p.identifiant,
         
-        -- Informations personnelles
+        -- Informations personnelles (ANONYMISÉES pour RGPD)
         p.civilite,
-        p.nom,
-        p.prenom,
+        
+        -- Hash SHA-256 tronqué à 8 caractères pour pseudonymisation
+        substring(lower(cast(sha256(cast(p.nom as varchar)) as varchar)), 1, 8) as nom_anonyme,
+        substring(lower(cast(sha256(cast(p.prenom as varchar)) as varchar)), 1, 8) as prenom_anonyme,
+        
+        -- Option : Garder initiales seulement
+        -- substring(p.nom, 1, 1) || '***' as nom_anonyme,
+        -- substring(p.prenom, 1, 1) || '***' as prenom_anonyme,
         
         -- Informations professionnelles
         p.profession,
