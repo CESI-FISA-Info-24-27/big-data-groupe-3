@@ -1,6 +1,6 @@
 .env
 dev/data/*
-dev/docs/*
+dev/docs/
 dev/logs/*
 !data/csv/.gitkeep
 dbt/target/
