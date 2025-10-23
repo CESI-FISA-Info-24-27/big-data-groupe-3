@@ -5,6 +5,14 @@
 -- ============================================
 
 -- ============================================
+-- CRÉATION DU SCHÉMA DWH
+-- ============================================
+
+CREATE SCHEMA IF NOT EXISTS dwh;
+CREATE SCHEMA IF NOT EXISTS datamart;
+SET search_path TO dwh, public;
+
+-- ============================================
 -- SUPPRESSION DES TABLES (si elles existent)
 -- ============================================
 
@@ -33,8 +41,8 @@ DROP TABLE IF EXISTS dim_patient CASCADE;
 CREATE TABLE dim_patient (
     sk_patient BIGSERIAL PRIMARY KEY,
     id_patient INT UNIQUE NOT NULL,  -- Business Key
-    nom VARCHAR(50),
-    prenom VARCHAR(50),
+    nom_anonyme VARCHAR(50),
+    prenom_anonyme VARCHAR(50),
     sexe VARCHAR(10),
     date_naissance DATE,
     age INT,
@@ -82,8 +90,8 @@ CREATE TABLE dim_professionnel (
     sk_professionnel BIGSERIAL PRIMARY KEY,
     identifiant VARCHAR(20) NOT NULL,  -- RPPS/ADELI - Business Key
     civilite VARCHAR(10),
-    nom VARCHAR(50),
-    prenom VARCHAR(50),
+    nom_anonyme VARCHAR(50),
+    prenom_anonyme VARCHAR(50),
     profession VARCHAR(100),
     categorie_professionnelle VARCHAR(50),
     fk_specialite BIGINT REFERENCES dim_specialite(sk_specialite),
@@ -230,6 +238,7 @@ CREATE TABLE fait_consultation (
     sk_diagnostic BIGINT NOT NULL REFERENCES dim_diagnostic(sk_diagnostic),
     sk_mutuelle BIGINT REFERENCES dim_mutuelle(sk_mutuelle),
     sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
+    sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement(sk_etablissement),
     
     -- Dimensions dégénérées
     num_consultation INT,
@@ -248,6 +257,7 @@ CREATE INDEX idx_fait_consultation_patient ON fait_consultation(sk_patient);
 CREATE INDEX idx_fait_consultation_professionnel ON fait_consultation(sk_professionnel);
 CREATE INDEX idx_fait_consultation_diagnostic ON fait_consultation(sk_diagnostic);
 CREATE INDEX idx_fait_consultation_temps ON fait_consultation(sk_temps);
+CREATE INDEX idx_fait_consultation_etablissement ON fait_consultation(sk_etablissement);
 
 COMMENT ON TABLE fait_consultation IS 'Fait Consultation - Chargement quotidien incrémental';
 COMMENT ON COLUMN fait_consultation.duree_consultation IS 'MESURE : Durée en minutes';
@@ -383,86 +393,212 @@ COMMENT ON COLUMN fait_qualite_soins.ratio_iso_ortho IS 'MESURE : Ratio infectio
 
 
 -- ============================================
--- VUES UTILES POUR ANALYSES
+-- Inserts Initiaux
 -- ============================================
 
--- Vue pour analyses consultations
-CREATE VIEW v_analyse_consultations AS
-SELECT 
-    p.sexe,
-    p.tranche_age,
-    prof.profession,
-    d.categorie_cim10,
-    t.annee,
-    t.mois,
-    COUNT(fc.nombre_consultations) AS nb_consultations,
-    AVG(fc.duree_consultation) AS duree_moyenne_min
-FROM fait_consultation fc
-JOIN dim_patient p ON fc.sk_patient = p.sk_patient
-JOIN dim_professionnel prof ON fc.sk_professionnel = prof.sk_professionnel
-JOIN dim_diagnostic d ON fc.sk_diagnostic = d.sk_diagnostic
-JOIN dim_temps t ON fc.sk_temps = t.sk_temps
-GROUP BY p.sexe, p.tranche_age, prof.profession, d.categorie_cim10, t.annee, t.mois;
-
--- Vue pour analyses hospitalisations
-CREATE VIEW v_analyse_hospitalisations AS
-SELECT 
-    p.sexe,
-    p.tranche_age,
-    e.type_etablissement,
-    e.region,
-    d.categorie_cim10,
-    t.annee,
-    COUNT(fh.nombre_hospitalisations) AS nb_hospitalisations,
-    AVG(fh.jour_hospitalisation) AS duree_moyenne_sejour
-FROM fait_hospitalisation fh
-JOIN dim_patient p ON fh.sk_patient = p.sk_patient
-JOIN dim_etablissement e ON fh.sk_etablissement = e.sk_etablissement
-JOIN dim_diagnostic d ON fh.sk_diagnostic = d.sk_diagnostic
-JOIN dim_temps t ON fh.sk_temps = t.sk_temps
-GROUP BY p.sexe, p.tranche_age, e.type_etablissement, e.region, d.categorie_cim10, t.annee;
-
--- Vue pour analyses décès
-CREATE VIEW v_analyse_deces AS
-SELECT 
-    l.region,
-    t.annee,
-    t.mois,
-    COUNT(fd.nombre_deces) AS nb_deces,
-    AVG(fd.age_deces) AS age_moyen_deces
-FROM fait_deces fd
-JOIN dim_localisation l ON fd.sk_localisation = l.sk_localisation
-JOIN dim_temps t ON fd.sk_temps = t.sk_temps
-GROUP BY l.region, t.annee, t.mois;
-
--- Vue pour analyses satisfaction
-CREATE VIEW v_analyse_satisfaction AS
-SELECT 
-    l.region,
-    e.type_etablissement,
-    t.annee,
-    AVG(fs.score_global) AS score_moyen_global,
-    AVG(fs.taux_recommandation) AS taux_reco_moyen,
-    COUNT(DISTINCT e.sk_etablissement) AS nb_etablissements
-FROM fait_satisfaction fs
-JOIN dim_etablissement e ON fs.sk_etablissement = e.sk_etablissement
-JOIN dim_localisation l ON fs.sk_localisation = l.sk_localisation
-JOIN dim_temps t ON fs.sk_temps = t.sk_temps
-GROUP BY l.region, e.type_etablissement, t.annee;
-
+-- ============================================
+-- INSERT PAR DÉFAUT DIM_PATIENT
+-- ============================================
+INSERT INTO dim_patient (
+    sk_patient,
+    id_patient,
+    nom_anonyme,
+    prenom_anonyme,
+    sexe,
+    date_naissance,
+    age,
+    tranche_age,
+    groupe_sanguin,
+    poids,
+    taille,
+    code_postal,
+    ville,
+    pays,
+    num_secu_hash,
+    date_chargement,
+    date_modification
+)
+VALUES (
+    -1,
+    -1,
+    'Non renseigné',       -- VARCHAR(50)
+    'Non renseigné',       -- VARCHAR(50)
+    'UNK',                 -- VARCHAR(10)
+    NULL,
+    NULL,
+    'UNK',                 -- VARCHAR(20)
+    'UNK',                 -- VARCHAR(3)
+    NULL,
+    NULL,
+    '00000',               -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(100)
+    'FR',                  -- VARCHAR(2)
+    '0000000000000000000000000000000000000000000000000000000000000000', -- VARCHAR(64)
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+);
 
 -- ============================================
--- GRANT DES PERMISSIONS (à adapter)
+-- INSERT PAR DÉFAUT DIM_SPECIALITE
 -- ============================================
+INSERT INTO dim_specialite (
+    sk_specialite,
+    code_specialite,
+    fonction,
+    specialite,
+    categorie,
+    date_chargement
+)
+VALUES (
+    -1,
+    'UNKNOWN',             -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(100)
+    'Non renseigné',       -- VARCHAR(100)
+    'Non renseigné',       -- VARCHAR(50)
+    CURRENT_TIMESTAMP
+);
 
--- GRANT SELECT ON ALL TABLES IN SCHEMA public TO role_lecture;
--- GRANT INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO role_etl;
--- GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO role_etl;
+-- ============================================
+-- INSERT PAR DÉFAUT DIM_PROFESSIONNEL
+-- ============================================
+INSERT INTO dim_professionnel (
+    sk_professionnel,
+    identifiant,
+    civilite,
+    nom_anonyme,
+    prenom_anonyme,
+    profession,
+    categorie_professionnelle,
+    fk_specialite,
+    mode_exercice,
+    fk_organisation,
+    date_debut_validite,
+    date_fin_validite,
+    est_actuel,
+    date_chargement
+)
+VALUES (
+    -1,
+    'UNKNOWN',             -- VARCHAR(20)
+    'UNK',                 -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(50)
+    'Non renseigné',       -- VARCHAR(50)
+    'Non renseigné',       -- VARCHAR(100)
+    'Non renseigné',       -- VARCHAR(50)
+    -1,
+    'UNK',                 -- VARCHAR(20)
+    'UNKNOWN',             -- VARCHAR(20)
+    CURRENT_DATE,
+    NULL,
+    TRUE,
+    CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- INSERT PAR DÉFAUT DIM_DIAGNOSTIC
+-- ============================================
+INSERT INTO dim_diagnostic (
+    sk_diagnostic,
+    code_diagnostic,
+    libelle_diagnostic,
+    categorie_cim10,
+    chapitre_cim10,
+    source_donnee,
+    date_chargement
+)
+VALUES (
+    -1,
+    'UNKNOWN',             -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(255)
+    'UNK',                 -- VARCHAR(5)
+    'Non renseigné',       -- VARCHAR(100)
+    'Non renseigné',       -- VARCHAR(50)
+    CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- INSERT PAR DÉFAUT DIM_ETABLISSEMENT
+-- ============================================
+INSERT INTO dim_etablissement (
+    sk_etablissement,
+    finess,
+    nom_etablissement,
+    type_etablissement,
+    categorie,
+    region,
+    departement,
+    adresse,
+    code_postal,
+    ville,
+    date_chargement
+)
+VALUES (
+    -1,
+    'UNKNOWN',             -- VARCHAR(20)
+    'Non renseigné',       -- VARCHAR(255)
+    'Non renseigné',       -- VARCHAR(50)
+    'Non renseigné',       -- VARCHAR(100)
+    'Non renseigné',       -- VARCHAR(100)
+    '000',                 -- VARCHAR(3)
+    'Non renseigné',       -- VARCHAR(255)
+    '00000',               -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(100)
+    CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- INSERT PAR DÉFAUT DIM_LOCALISATION
+-- ============================================
+INSERT INTO dim_localisation (
+    sk_localisation,
+    code_lieu,
+    nom_lieu,
+    code_postal,
+    ville,
+    departement,
+    region,
+    pays,
+    type_lieu,
+    latitude,
+    longitude,
+    date_chargement
+)
+VALUES (
+    -1,
+    'UNKNOWN',             -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(100)
+    '00000',               -- VARCHAR(10)
+    'Non renseigné',       -- VARCHAR(100)
+    '000',                 -- VARCHAR(3)
+    'Non renseigné',       -- VARCHAR(100)
+    'FR',                  -- VARCHAR(2)
+    'UNK',                 -- VARCHAR(50)
+    0.0,
+    0.0,
+    CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- INSERT PAR DÉFAUT DIM_MUTUELLE
+-- ============================================
+INSERT INTO dim_mutuelle (
+    sk_mutuelle,
+    id_mut,
+    nom_mutuelle,
+    adresse,
+    type_mutuelle,
+    date_chargement
+)
+VALUES (
+    -1,
+    -1,
+    'Non renseigné',       -- VARCHAR(255)
+    'Non renseigné',       -- VARCHAR(255)
+    'UNK',                 -- VARCHAR(50)
+    CURRENT_TIMESTAMP
+);
 
 
 -- ============================================
 -- FIN DU SCRIPT MLD
 -- ============================================
-
--- Pour vérifier la création des tables :
--- SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;
