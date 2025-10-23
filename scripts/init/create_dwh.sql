@@ -136,6 +136,8 @@ COMMENT ON TABLE dim_diagnostic IS 'Dimension Diagnostic CIM-10 consolidée - Al
 CREATE TABLE dim_etablissement (
     sk_etablissement BIGSERIAL PRIMARY KEY,
     finess VARCHAR(20) UNIQUE NOT NULL,  -- N° FINESS - Business Key
+    finess_etablissement_juridique VARCHAR(20),
+    finess_site VARCHAR(20),
     nom_etablissement VARCHAR(255),
     type_etablissement VARCHAR(50),  -- 'CH', 'Privé', 'PSPH/EBNL'
     categorie VARCHAR(100),
