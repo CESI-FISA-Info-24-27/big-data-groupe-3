@@ -22,6 +22,9 @@ dimension_etablissement as (
         cast(identifiant_organisation as varchar) as finess,  -- Convertir BIGINT en VARCHAR pour conformité
         
         -- Informations établissement
+        cast(finess_etablissement_juridique as varchar) as finess_etablissement_juridique,
+        cast(finess_site as varchar) as finess_site,
+
         raison_sociale_site as nom_etablissement,
         
         -- Type établissement (classification automatique basée sur le nom)
