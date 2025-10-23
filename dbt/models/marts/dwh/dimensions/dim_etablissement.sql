@@ -16,10 +16,10 @@ with etablissements_source as (
 dimension_etablissement as (
     select
         -- Clé substitut (génération séquentielle)
-        row_number() over (order by finess_site) as sk_etablissement,
+        row_number() over (order by identifiant_organisation) as sk_etablissement,
         
         -- Business key (FINESS site)
-        cast(finess_site as varchar) as finess,  -- Convertir BIGINT en VARCHAR pour conformité
+        cast(identifiant_organisation as varchar) as finess,  -- Convertir BIGINT en VARCHAR pour conformité
         
         -- Informations établissement
         raison_sociale_site as nom_etablissement,

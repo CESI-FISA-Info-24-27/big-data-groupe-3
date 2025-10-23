@@ -14,8 +14,6 @@ with source as (
 cleaned as (
     select
         -- Business Keys
-        cast(finess_site as bigint) as finess_site,
-        trim(finess_etablissement_juridique) as finess_etablissement_juridique,
         trim(identifiant_organisation) as identifiant_organisation,
         
         -- Informations établissement
@@ -64,7 +62,7 @@ cleaned as (
         current_timestamp as loaded_at
         
     from source
-    where finess_site is not null
+    where identifiant_organisation is not null
 )
 
 select * from cleaned
