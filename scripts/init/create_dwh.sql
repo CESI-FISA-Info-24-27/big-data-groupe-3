@@ -368,28 +368,27 @@ COMMENT ON COLUMN fait_satisfaction.nombre_reponses IS 'MESURE : Nombre réponse
 CREATE TABLE fait_qualite_soins (
     sk_fait_qualite BIGSERIAL PRIMARY KEY,
     sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement(sk_etablissement),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
-    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation(sk_localisation),
     
     -- MESURES
+	region VARCHAR(255),
+	annee_enquete INT,
+	annee_donnee INT,
     ratio_ete_ortho DECIMAL(10,6),  -- Événements thrombo-emboliques
-    alerte_ete INT,  -- 0=Normal, 1=Alerte
-    ratio_iso_ortho DECIMAL(10,6),  -- Infections site opératoire
-    alerte_iso INT,  -- 0=Normal, 1=Alerte
+    alerte_ete INT,  -- 0=Normal, 1=Alerte,
+	cible BIGINT,
+	observations BIGINT,
     
     -- Dimensions dégénérées
-    evolution_ete VARCHAR(10),
+    attendu DOUBLE PRECISION,
+	position_seuil VARCHAR(20),
     
     date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_fait_qualite_etablissement ON fait_qualite_soins(sk_etablissement);
-CREATE INDEX idx_fait_qualite_temps ON fait_qualite_soins(sk_temps);
-CREATE INDEX idx_fait_qualite_localisation ON fait_qualite_soins(sk_localisation);
 
 COMMENT ON TABLE fait_qualite_soins IS 'Fait Qualité Soins IQSS - Chargement annuel';
 COMMENT ON COLUMN fait_qualite_soins.ratio_ete_ortho IS 'MESURE : Ratio événements thrombo-emboliques';
-COMMENT ON COLUMN fait_qualite_soins.ratio_iso_ortho IS 'MESURE : Ratio infections site opératoire';
 
 
 -- ============================================
