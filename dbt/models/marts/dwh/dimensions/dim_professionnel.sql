@@ -18,6 +18,18 @@ specialites_dim as (
     select * from {{ ref('dim_specialite') }}
 ),
 
+etablissements_dim as (
+    select * from {{ ref('dim_etablissement') }}
+),
+
+activites_professionnels as (
+    select 
+        identifiant,
+        identifiant_organisation,
+        mode_exercice
+    from {{ ref('stg_etablissement_activite') }}
+),
+
 dimension_professionnel as (
     select
         -- Clé substitut (génération séquentielle)
@@ -33,10 +45,6 @@ dimension_professionnel as (
         substring(lower(cast(sha256(cast(p.nom as varchar)) as varchar)), 1, 8) as nom_anonyme,
         substring(lower(cast(sha256(cast(p.prenom as varchar)) as varchar)), 1, 8) as prenom_anonyme,
         
-        -- Option : Garder initiales seulement
-        -- substring(p.nom, 1, 1) || '***' as nom_anonyme,
-        -- substring(p.prenom, 1, 1) || '***' as prenom_anonyme,
-        
         -- Informations professionnelles
         p.profession,
         p.categorie_professionnelle,
@@ -45,13 +53,12 @@ dimension_professionnel as (
         s.sk_specialite as fk_specialite,
         
         -- Mode d'exercice
-        p.mode_exercice,  -- Libéral, Salarié, Mixte
+        p.mode_exercice,
         
-        -- Organisation d'appartenance (FINESS)
-        null as fk_organisation,  -- TODO: À enrichir avec FINESS établissement principal
+        -- FK vers dim_etablissement (via table d'activité)
+        e.sk_etablissement as fk_organisation,
         
         -- SCD Type 2 : Gestion de l'historique
-        -- Pour l'instant, version initiale = version actuelle
         current_date as date_debut_validite,
         cast(null as date) as date_fin_validite,
         true as est_actuel,
@@ -61,6 +68,10 @@ dimension_professionnel as (
         
     from professionnels_source p
     left join specialites_dim s on p.code_specialite = s.code_specialite
+    
+    left join activites_professionnels a on p.identifiant = a.identifiant
+
+    left join etablissements_dim e on a.identifiant_organisation = e.finess
 )
 
 select * from dimension_professionnel
