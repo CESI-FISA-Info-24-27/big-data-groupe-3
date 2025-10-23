@@ -334,10 +334,10 @@ COMMENT ON COLUMN fait_deces.nombre_deces IS 'MESURE : COUNT = 1';
 CREATE TABLE fait_satisfaction (
     sk_fait_satisfaction BIGSERIAL PRIMARY KEY,
     sk_etablissement BIGINT NOT NULL REFERENCES dim_etablissement(sk_etablissement),
-    sk_temps BIGINT NOT NULL REFERENCES dim_temps(sk_temps),
-    sk_localisation BIGINT NOT NULL REFERENCES dim_localisation(sk_localisation),
     
     -- MESURES
+    region VARCHAR(255),
+	annee_enquete INT,
     score_global DECIMAL(5,2),
     score_accueil DECIMAL(5,2),
     score_pec_infirmiers DECIMAL(5,2),
@@ -350,14 +350,12 @@ CREATE TABLE fait_satisfaction (
     
     -- Dimensions dégénérées
     classement VARCHAR(2),  -- 'A', 'B', 'C', 'D', 'DI'
-    evolution VARCHAR(10),
+    evolution VARCHAR(255),
     
     date_chargement TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_fait_satisfaction_etablissement ON fait_satisfaction(sk_etablissement);
-CREATE INDEX idx_fait_satisfaction_temps ON fait_satisfaction(sk_temps);
-CREATE INDEX idx_fait_satisfaction_localisation ON fait_satisfaction(sk_localisation);
 
 COMMENT ON TABLE fait_satisfaction IS 'Fait Satisfaction e-Satis 48h MCO - Chargement annuel';
 COMMENT ON COLUMN fait_satisfaction.score_global IS 'MESURE : Score satisfaction global';
