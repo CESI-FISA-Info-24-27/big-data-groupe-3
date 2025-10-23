@@ -1,6 +1,6 @@
 """
 Script principal pour charger toutes les données dans le staging DuckDB
-Lance les chargements CSV et PostgreSQL en parallèle
+Lance les chargements CSV et PostgreSQL à la suite (séquentiellement)
 """
 
 import subprocess
@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import io
-import concurrent.futures
 
 # Configurer l'encodage UTF-8 pour Windows
 if sys.platform == 'win32':
@@ -16,7 +15,7 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
-def run_script(script_name: str) -> tuple[str, int, str]:
+def run_script(script_name: str) -> tuple[str, int, str, float]:
     """
     Exécute un script Python et retourne son résultat
     """
@@ -35,7 +34,7 @@ def run_script(script_name: str) -> tuple[str, int, str]:
             encoding='utf-8'
         )
         
-        # Afficher la sortie en temps réel
+        # Afficher la sortie
         if result.stdout:
             print(result.stdout)
         if result.stderr:
@@ -58,7 +57,7 @@ def run_script(script_name: str) -> tuple[str, int, str]:
 
 def main():
     """
-    Lance tous les chargements
+    Lance tous les chargements de manière séquentielle
     """
     print("\n" + "="*80)
     print("CHARGEMENT COMPLET DU STAGING")
@@ -72,11 +71,12 @@ def main():
     ]
     
     start_time = datetime.now()
-    
-    # Lancer les scripts en parallèle
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(run_script, script) for script in scripts]
-        results = [future.result() for future in concurrent.futures.as_completed(futures)]
+    results = []
+
+    # Exécution séquentielle
+    for script in scripts:
+        result = run_script(script)
+        results.append(result)
     
     duration_total = (datetime.now() - start_time).total_seconds()
     
@@ -86,7 +86,7 @@ def main():
     print("="*80)
     
     all_success = True
-    for script_name, returncode, status, duration in sorted(results):
+    for script_name, returncode, status, duration in results:
         print(f"{status} {script_name} (durée: {duration:.1f}s)")
         if returncode != 0:
             all_success = False
@@ -94,7 +94,7 @@ def main():
     print("="*80)
     print(f"Durée totale: {duration_total:.1f}s")
     print(f"Fin: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     if all_success:
         print("\n✓ Tous les chargements ont réussi!")
         return 0
@@ -105,8 +105,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-
-
-
