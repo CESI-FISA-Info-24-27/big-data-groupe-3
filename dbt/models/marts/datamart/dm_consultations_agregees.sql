@@ -34,8 +34,8 @@ with consultations_base as (
         dd.chapitre_cim10,
         dd.categorie_cim10,
         
-        dp.nom as nom_professionnel,
-        dp.prenom as prenom_professionnel,
+        dp.nom_anonyme as nom_professionnel,
+        dp.prenom_anonyme as prenom_professionnel,
         ds.specialite,
         ds.fonction,
         

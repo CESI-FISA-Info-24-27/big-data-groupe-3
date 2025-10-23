@@ -35,10 +35,6 @@ dim_temps as (
     select * from {{ ref('dim_temps') }}
 ),
 
-dim_etablissement as (
-    select * from {{ ref('dim_etablissement') }}
-),
-
 -- Construction de la table de fait
 fait_consultation as (
     select
@@ -46,11 +42,13 @@ fait_consultation as (
         row_number() over (order by c.num_consultation) as sk_fait_consultation,
         
         -- Clés étrangères vers dimensions (LOOKUPS)
-        -- NOTE: sk_etablissement PAS dans db.sql ligne 226-245
         dp.sk_patient,
         dpr.sk_professionnel,
         dd.sk_diagnostic,
         coalesce(dm.sk_mutuelle, -1) as sk_mutuelle,  -- -1 = Mutuelle inconnue
+        
+        coalesce(dpr.fk_organisation, -1) as sk_etablissement,  -- -1 = Établissement inconnu
+        
         dt.sk_temps,
         
         -- Dimensions dégénérées (attributs gardés dans le fait)
