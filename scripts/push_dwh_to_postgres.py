@@ -86,9 +86,10 @@ TABLES_ORDRE = [
     'fait_satisfaction',
     'fait_qualite_soins',
     # Data Marts pour Power BI
-    'dm_consultations_agregees',
-    'dm_hospitalisations_agregees',
-    'dm_analyse_territoriale'
+    'dm_consultations_analysis',
+    'dm_hospitalisations_analysis',
+    'dm_deces_analysis',
+    'dm_satisfaction_analysis'
 ]
 
 
