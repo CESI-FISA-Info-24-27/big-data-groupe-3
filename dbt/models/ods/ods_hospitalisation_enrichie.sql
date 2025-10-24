@@ -43,7 +43,7 @@ hospitalisation_complete as (
         p.tranche_age as patient_tranche_age,
         
         -- Informations établissement
-        e.finess_site,
+        e.identifiant_organisation as etablissement_identifiant,
         e.raison_sociale_site as etablissement_nom,
         e.commune as etablissement_commune,
         e.departement as etablissement_departement,
@@ -72,7 +72,7 @@ hospitalisation_complete as (
         
     from hospitalisations h
     inner join patients p on h.id_patient = p.id_patient
-    left join etablissements e on try_cast(h.identifiant_organisation as bigint) = e.finess_site
+    left join etablissements e on h.identifiant_organisation = e.identifiant_organisation
     left join diagnostics d on h.code_diagnostic = d.code_diagnostic
 )
 

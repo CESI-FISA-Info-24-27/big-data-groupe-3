@@ -25,6 +25,11 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+try:
+    import duckdb
+except ImportError:
+    duckdb = None
+
 # Couleurs pour le terminal (Windows compatible)
 try:
     import colorama
@@ -42,6 +47,7 @@ except ImportError:
 SCRIPTS_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPTS_DIR.parent
 DBT_DIR = PROJECT_ROOT / "dbt"
+STAGING_DB = PROJECT_ROOT / "data" / "duckdb" / "staging.duckdb"
 
 # Définition des étapes du pipeline
 PIPELINE_STEPS = {
@@ -101,6 +107,74 @@ def print_step(step_num, status="INFO"):
     if status == "INFO":
         print(f"  Requis : {'Oui' if step['required'] else 'Non (optionnel)'}")
     print()
+
+
+def check_prerequisites():
+    """Vérifier et créer les prérequis nécessaires"""
+    print_header("VÉRIFICATION DES PRÉREQUIS")
+    
+    # 1. Vérifier que DuckDB est installé
+    if duckdb is None:
+        print(f"{RED}❌ Module DuckDB non trouvé{RESET}")
+        print(f"{YELLOW}Installation de DuckDB...{RESET}\n")
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "duckdb"],
+                check=True,
+                capture_output=True
+            )
+            print(f"{GREEN}✅ DuckDB installé avec succès{RESET}\n")
+            # Réimporter après installation
+            import duckdb as duckdb_module
+            globals()['duckdb'] = duckdb_module
+        except subprocess.CalledProcessError as e:
+            print(f"{RED}❌ Échec de l'installation de DuckDB{RESET}")
+            print(f"{RED}Erreur: {e}{RESET}\n")
+            return False
+    else:
+        print(f"{GREEN}✅ Module DuckDB disponible{RESET}\n")
+    
+    # 2. Vérifier/Créer le répertoire data/duckdb
+    duckdb_dir = STAGING_DB.parent
+    if not duckdb_dir.exists():
+        print(f"{YELLOW}📁 Création du répertoire {duckdb_dir}...{RESET}")
+        try:
+            duckdb_dir.mkdir(parents=True, exist_ok=True)
+            print(f"{GREEN}✅ Répertoire créé{RESET}\n")
+        except Exception as e:
+            print(f"{RED}❌ Échec de la création du répertoire{RESET}")
+            print(f"{RED}Erreur: {e}{RESET}\n")
+            return False
+    else:
+        print(f"{GREEN}✅ Répertoire {duckdb_dir} existe{RESET}\n")
+    
+    # 3. Vérifier/Créer la base DuckDB de staging
+    if not STAGING_DB.exists():
+        print(f"{YELLOW}📁 Création de la base DuckDB: {STAGING_DB}...{RESET}")
+        try:
+            # Import local si nécessaire
+            import duckdb as db_module
+            con = db_module.connect(str(STAGING_DB))
+            con.close()
+            
+            file_size = STAGING_DB.stat().st_size
+            print(f"{GREEN}✅ Base DuckDB créée : {STAGING_DB}{RESET}")
+            print(f"{GREEN}   Taille : {file_size} bytes{RESET}\n")
+        except Exception as e:
+            print(f"{RED}❌ Échec de la création de la base DuckDB{RESET}")
+            print(f"{RED}Erreur: {e}{RESET}\n")
+            return False
+    else:
+        file_size = STAGING_DB.stat().st_size
+        print(f"{GREEN}✅ Base DuckDB existe : {STAGING_DB}{RESET}")
+        print(f"{GREEN}   Taille : {file_size:,} bytes{RESET}\n")
+    
+    print(f"{GREEN}{'=' * 70}")
+    print(f"✅ Tous les prérequis sont satisfaits")
+    print(f"{'=' * 70}{RESET}\n")
+    
+    return True
+
 
 
 def run_command(cmd, cwd=None, description=""):
@@ -171,16 +245,43 @@ def step_2_dbt_run():
         print(f"{RED}❌ Répertoire dbt introuvable : {DBT_DIR}{RESET}\n")
         return False
     
-    # Option 1 : dbt run complet
+    # Trouver l'exécutable dbt (dans le venv ou système)
+    dbt_executable = find_dbt_executable()
+    
+    if not dbt_executable:
+        print(f"{RED}❌ Commande 'dbt' introuvable{RESET}")
+        print(f"{YELLOW}💡 Installez dbt-core et dbt-duckdb :{RESET}")
+        print(f"   pip install dbt-core dbt-duckdb\n")
+        return False
+    
     print(f"{YELLOW}Exécution dbt run (tous les modèles)...{RESET}\n")
     
     success = run_command(
-        [sys.executable, "-m", "dbt", "run"],
+        [dbt_executable, "run"],
         cwd=str(DBT_DIR),
         description="Création des modèles dbt (staging + ODS + DWH)"
     )
     
     return success
+
+
+def find_dbt_executable():
+    """Trouver l'exécutable dbt"""
+    import shutil
+    
+    # 1. Chercher dans le même dossier que python (venv)
+    python_dir = Path(sys.executable).parent
+    dbt_in_venv = python_dir / "dbt"
+    
+    if dbt_in_venv.exists():
+        return str(dbt_in_venv)
+    
+    # 2. Chercher dans le PATH système
+    dbt_in_path = shutil.which("dbt")
+    if dbt_in_path:
+        return dbt_in_path
+    
+    return None
 
 
 def step_3_push_dwh():
@@ -221,13 +322,20 @@ def step_5_run_tests():
     """Étape 5 : Tests de validation"""
     print_step(5, "INFO")
     
-    # Test 1 : Tests dbt
-    print(f"{BLUE}[TEST 1] Tests dbt{RESET}\n")
-    success_dbt = run_command(
-        [sys.executable, "-m", "dbt", "test"],
-        cwd=str(DBT_DIR),
-        description="Exécution des tests dbt"
-    )
+    # Trouver l'exécutable dbt
+    dbt_executable = find_dbt_executable()
+    
+    if not dbt_executable:
+        print(f"{YELLOW}⚠️  Commande 'dbt' introuvable, passage des tests dbt...{RESET}\n")
+        success_dbt = True  # Ne pas bloquer
+    else:
+        # Test 1 : Tests dbt
+        print(f"{BLUE}[TEST 1] Tests dbt{RESET}\n")
+        success_dbt = run_command(
+            [dbt_executable, "test"],
+            cwd=str(DBT_DIR),
+            description="Exécution des tests dbt"
+        )
     
     # Test 2 : Test extension Postgres
     print(f"{BLUE}[TEST 2] Test extension Postgres{RESET}\n")
@@ -446,6 +554,11 @@ Exemples d'utilisation:
         print(f"   Assurez-vous d'exécuter ce script depuis le répertoire du projet.")
         sys.exit(1)
     
+    # VÉRIFICATION DES PRÉREQUIS
+    if not check_prerequisites():
+        print(f"{RED}❌ Les prérequis ne sont pas satisfaits. Arrêt.{RESET}")
+        sys.exit(1)
+    
     # Mode full build
     if args.full:
         success = full_build()
@@ -469,4 +582,3 @@ Exemples d'utilisation:
 
 if __name__ == '__main__':
     main()
-

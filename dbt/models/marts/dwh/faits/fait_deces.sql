@@ -26,6 +26,18 @@ dim_temps as (
     select * from {{ ref('dim_temps') }}
 ),
 
+-- ANONYMISATION des décès pour matching avec dim_patient
+deces_anonymise as (
+    select 
+        *,
+        -- Anonymiser avec SHA256 comme dans dim_patient
+        substring(lower(cast(sha256(cast(nom as varchar)) as varchar)), 1, 8) as nom_anonyme,
+        substring(lower(cast(sha256(cast(prenom as varchar)) as varchar)), 1, 8) as prenom_anonyme,
+        -- Convertir date en timestamp pour matcher le format de dim_patient
+        cast(date_naissance as timestamp) as date_naissance_ts
+    from deces_source
+),
+
 -- Construction de la table de fait
 fait_deces as (
     select
@@ -33,7 +45,7 @@ fait_deces as (
         row_number() over (order by d.numero_acte_deces) as sk_fait_deces,
         
         -- Clés étrangères vers dimensions (LOOKUPS)
-        -- SK_PATIENT : Fuzzy matching sur nom/prenom/date_naissance (PEUT ÊTRE NULL → -1)
+        -- SK_PATIENT : Matching via noms/prénoms anonymisés + date de naissance
         coalesce(dp.sk_patient, -1) as sk_patient,  -- -1 = Patient inconnu
         
         -- SK_LOCALISATION : Lieu du décès
@@ -53,7 +65,7 @@ fait_deces as (
         -- Métadonnées
         d.loaded_at as date_chargement
         
-    from deces_source d
+    from deces_anonymise d
     
     -- Lookups obligatoires
     inner join dim_temps dt on d.date_deces = dt.date_complete
@@ -63,11 +75,11 @@ fait_deces as (
         on d.code_lieu_deces = dl.code_lieu
         and dl.type_lieu like '%Deces%'
     
-    -- Fuzzy matching patient (LEFT car tous les décès ne sont pas dans notre base patients)
+    -- Fuzzy matching patient avec NOMS ANONYMISÉS + DATE
     left join dim_patient dp
-        on d.nom = dp.nom
-        and d.prenom = dp.prenom
-        and d.date_naissance = dp.date_naissance
+        on d.nom_anonyme = dp.nom_anonyme
+        and d.prenom_anonyme = dp.prenom_anonyme
+        and d.date_naissance_ts = dp.date_naissance
 )
 
 select * from fait_deces

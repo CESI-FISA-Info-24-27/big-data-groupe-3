@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Script pour pousser les tables DWH de DuckDB vers PostgreSQL
-Les tables doivent déjà exister dans PostgreSQL
-Le script fait : TRUNCATE puis INSERT
+Script OPTIMISÉ pour pousser les tables DWH de DuckDB vers PostgreSQL
+AMÉLIORATIONS :
+- Traitement par batch pour éviter les erreurs de mémoire (OOM)
+- Support des très grandes tables (25M+ lignes)
+- Monitoring de la progression
+- Gestion intelligente de la mémoire
 
 Usage: python push_dwh_to_postgres.py
 Configuration: Lecture depuis fichier .env
@@ -14,6 +17,7 @@ from psycopg2.extras import execute_batch
 import os
 import sys
 from pathlib import Path
+import time
 
 # Essayer de charger dotenv, mais optionnel
 try:
@@ -34,6 +38,16 @@ POSTGRES_CONFIG = {
 
 # Configuration DuckDB
 DUCKDB_PATH = 'data/duckdb/staging.duckdb'
+
+# NOUVELLE CONFIGURATION : Tailles de batch selon le type de table
+BATCH_CONFIG = {
+    'fait_deces': 50000,        # Table très volumineuse (25M+ lignes)
+    'fait_consultation': 100000, # Table volumineuse
+    'fait_hospitalisation': 100000,
+    'fait_satisfaction': 100000,
+    'fait_qualite_soins': 100000,
+    'default': 200000            # Taille par défaut pour les dimensions
+}
 
 # Schema PostgreSQL cible (dynamique selon la table)
 def get_target_schema(table_name):
@@ -102,42 +116,62 @@ def connect_postgres():
         exit(1)
 
 
-def push_table(duck_conn, pg_conn, table_name):
+def get_table_count(duck_conn, table_name):
+    """Obtenir le nombre de lignes dans une table DuckDB"""
+    source_schema = 'datamart' if table_name.startswith('dm_') else 'dwh'
+    query = f"SELECT COUNT(*) as cnt FROM {source_schema}.{table_name};"
+    result = duck_conn.execute(query).fetchone()
+    return result[0] if result else 0
+
+
+def push_table_batch(duck_conn, pg_conn, table_name):
     """
-    Pousse une table de DuckDB vers PostgreSQL en utilisant COPY (ultra-rapide)
+    Pousse une table de DuckDB vers PostgreSQL en utilisant COPY avec traitement par BATCH
+    
+    OPTIMISATIONS :
+    - Traitement par lots pour éviter le OOM (Out Of Memory)
+    - Taille de batch adaptative selon la table
+    - Monitoring de la progression en temps réel
+    - Gestion mémoire optimisée
     
     Stratégie :
-    1. Sauvegarder la ligne "Inconnu" (sk=-1) si elle existe
-    2. TRUNCATE la table PostgreSQL (vider sans DROP)
-    3. COPY les données depuis un buffer CSV en mémoire (10-100x plus rapide que INSERT)
-    4. Restaurer la ligne "Inconnu" si nécessaire
+    1. Compter le nombre total de lignes
+    2. TRUNCATE la table PostgreSQL
+    3. Traiter par batch avec COPY (ultra-rapide)
+    4. Afficher la progression
     """
     
     print(f"\n[{table_name}] Push en cours...")
+    start_time = time.time()
     
     try:
         # Déterminer le schéma source et cible
         source_schema = 'datamart' if table_name.startswith('dm_') else 'dwh'
         target_schema = get_target_schema(table_name)
         
-        # 1. Lire depuis DuckDB
-        query = f"SELECT * FROM {source_schema}.{table_name};"
-        df = duck_conn.execute(query).fetchdf()
+        # 1. Compter le total de lignes
+        total_rows = get_table_count(duck_conn, table_name)
         
-        if df.empty:
+        if total_rows == 0:
             print(f"  [ATTENTION] Table vide dans DuckDB : {table_name}")
             return
         
-        nb_lignes = len(df)
-        print(f"  [INFO] {nb_lignes:,} lignes lues depuis DuckDB")
+        print(f"  [INFO] {total_rows:,} lignes totales a traiter")
+        
+        # Déterminer la taille de batch
+        batch_size = BATCH_CONFIG.get(table_name, BATCH_CONFIG['default'])
+        print(f"  [INFO] Taille de batch : {batch_size:,} lignes")
         
         # 2. Sauvegarder la ligne "Inconnu" (sk=-1) pour les dimensions
         cursor = pg_conn.cursor()
         unknown_row = None
+        sk_col = None
         
         if table_name.startswith('dim_'):
-            # Identifier la colonne clé (première colonne qui commence par "sk_")
-            sk_col = [col for col in df.columns if col.startswith('sk_')][0] if any(col.startswith('sk_') for col in df.columns) else None
+            # Obtenir les colonnes de la table
+            test_query = f"SELECT * FROM {source_schema}.{table_name} LIMIT 1;"
+            test_df = duck_conn.execute(test_query).fetchdf()
+            sk_col = [col for col in test_df.columns if col.startswith('sk_')][0] if any(col.startswith('sk_') for col in test_df.columns) else None
             
             if sk_col:
                 try:
@@ -150,67 +184,99 @@ def push_table(duck_conn, pg_conn, table_name):
                     pass
         
         # 3. TRUNCATE la table PostgreSQL (vider sans DROP)
-        # Désactiver temporairement les contraintes FK pour TRUNCATE
         truncate_sql = f"TRUNCATE TABLE {target_schema}.{table_name} CASCADE;"
         cursor.execute(truncate_sql)
         pg_conn.commit()
         print(f"  [INFO] Table PostgreSQL videe (TRUNCATE)")
         
-        # 3. Utiliser COPY pour un import ultra-rapide
+        # 4. Traiter par BATCH avec COPY
         import io
         import pandas as pd
         import numpy as np
         
-        # Remplacer les NaN/NA par None et convertir les types correctement
-        df_clean = df.copy()
-        for col in df_clean.columns:
-            # Convertir les float qui sont en fait des int (ex: 4.0 → 4)
-            # Cela arrive souvent avec les colonnes contenant des NULL (pandas convertit int→float pour gérer NULL)
-            if df_clean[col].dtype in ['float64', 'float32']:
-                # Vérifier si toutes les valeurs non-NULL n'ont pas de partie décimale
-                non_null = df_clean[col].dropna()
-                if len(non_null) > 0:
-                    try:
-                        # Vérifier si toutes les valeurs sont des entiers (pas de décimales)
-                        is_all_int = all(x == int(x) for x in non_null)
-                        if is_all_int:
-                            # Convertir en Int64 (type nullable pandas qui supporte NULL)
-                            df_clean[col] = df_clean[col].astype('Int64')
-                    except (ValueError, OverflowError, TypeError):
-                        pass
+        offset = 0
+        total_inserted = 0
+        batch_num = 1
+        
+        while offset < total_rows:
+            batch_start = time.time()
             
-            # Remplacer les NaN/NA/NaT/pd.NA par None pour CSV
-            # Utiliser mask pour remplacer proprement
-            df_clean[col] = df_clean[col].where(pd.notna(df_clean[col]), None)
+            # Lire un batch depuis DuckDB
+            query = f"""
+                SELECT * FROM {source_schema}.{table_name}
+                ORDER BY 1  -- Ordre stable pour pagination
+                LIMIT {batch_size} OFFSET {offset};
+            """
+            df = duck_conn.execute(query).fetchdf()
+            
+            if df.empty:
+                break
+            
+            nb_lignes_batch = len(df)
+            
+            # Nettoyer les données (même logique que l'original)
+            df_clean = df.copy()
+            for col in df_clean.columns:
+                # Convertir les float qui sont en fait des int
+                if df_clean[col].dtype in ['float64', 'float32']:
+                    non_null = df_clean[col].dropna()
+                    if len(non_null) > 0:
+                        try:
+                            is_all_int = all(x == int(x) for x in non_null)
+                            if is_all_int:
+                                df_clean[col] = df_clean[col].astype('Int64')
+                        except (ValueError, OverflowError, TypeError):
+                            pass
+                
+                # Remplacer les NaN/NA/NaT/pd.NA par None
+                df_clean[col] = df_clean[col].where(pd.notna(df_clean[col]), None)
+            
+            # Créer un buffer CSV en mémoire
+            buffer = io.StringIO()
+            df_clean.to_csv(buffer, index=False, header=False, sep='\t', na_rep='\\N')
+            buffer.seek(0)
+            
+            # Préparer les colonnes
+            colonnes = ', '.join([f'"{col}"' for col in df.columns])
+            
+            # COPY depuis le buffer
+            copy_sql = f"COPY {target_schema}.{table_name} ({colonnes}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')"
+            
+            cursor.copy_expert(copy_sql, buffer)
+            pg_conn.commit()
+            
+            # Libérer la mémoire
+            del df
+            del df_clean
+            del buffer
+            
+            # Mise à jour des compteurs
+            total_inserted += nb_lignes_batch
+            offset += batch_size
+            batch_num += 1
+            
+            # Afficher la progression
+            progress_pct = (total_inserted / total_rows) * 100
+            batch_time = time.time() - batch_start
+            elapsed_time = time.time() - start_time
+            
+            print(f"    Batch {batch_num-1}: {nb_lignes_batch:,} lignes en {batch_time:.1f}s | "
+                  f"Total: {total_inserted:,}/{total_rows:,} ({progress_pct:.1f}%) | "
+                  f"Temps écoulé: {elapsed_time:.1f}s")
         
-        # Créer un buffer CSV en mémoire
-        buffer = io.StringIO()
-        df_clean.to_csv(buffer, index=False, header=False, sep='\t', na_rep='\\N')
-        buffer.seek(0)
-        
-        # Préparer les colonnes
-        colonnes = ', '.join([f'"{col}"' for col in df.columns])
-        
-        # COPY depuis le buffer (ultra-rapide!)
-        copy_sql = f"COPY {POSTGRES_SCHEMA}.{table_name} ({colonnes}) FROM STDIN WITH (FORMAT CSV, DELIMITER E'\\t', NULL '\\N')"
-        
-        cursor.copy_expert(copy_sql, buffer)
-        pg_conn.commit()
-        
-        # 4. Restaurer la ligne "Inconnu" (sk=-1) pour les dimensions
-        if unknown_row and table_name.startswith('dim_'):
+        # 5. Restaurer la ligne "Inconnu" (sk=-1) pour les dimensions
+        if unknown_row and table_name.startswith('dim_') and sk_col:
             try:
                 # Obtenir les noms de colonnes
-                cursor.execute(f"SELECT * FROM {POSTGRES_SCHEMA}.{table_name} LIMIT 0;")
+                cursor.execute(f"SELECT * FROM {target_schema}.{table_name} LIMIT 0;")
                 column_names = [desc[0] for desc in cursor.description]
                 
                 # Construire la requête INSERT avec ON CONFLICT
                 placeholders = ', '.join(['%s'] * len(column_names))
                 columns_str = ', '.join([f'"{col}"' for col in column_names])
-                sk_col = [col for col in column_names if col.startswith('sk_')][0]
                 
                 insert_sql = f"""
-                    INSERT INTO {POSTGRES_SCHEMA}.{table_name} ({columns_str})
+                    INSERT INTO {target_schema}.{table_name} ({columns_str})
                     VALUES ({placeholders})
                     ON CONFLICT ({sk_col}) DO NOTHING;
                 """
@@ -219,10 +285,12 @@ def push_table(duck_conn, pg_conn, table_name):
                 print(f"  [INFO] Ligne 'Inconnu' (sk=-1) restauree")
             except Exception as e:
                 print(f"  [ATTENTION] Echec restauration ligne Inconnu: {e}")
-                # Ne pas faire échouer tout le push pour ça
         
         cursor.close()
-        print(f"  [OK] {table_name} pousse avec succes ({nb_lignes:,} lignes)")
+        
+        total_time = time.time() - start_time
+        print(f"  [OK] {table_name} pousse avec succes!")
+        print(f"       Total: {total_inserted:,} lignes en {total_time:.1f}s ({total_inserted/total_time:.0f} lignes/s)")
         
     except Exception as e:
         print(f"  [ERREUR] {table_name}: {e}")
@@ -234,7 +302,7 @@ def main():
     """Fonction principale"""
     
     print("=" * 70)
-    print("PUSH DWH : DuckDB -> PostgreSQL")
+    print("PUSH DWH OPTIMISÉ : DuckDB -> PostgreSQL (Traitement par BATCH)")
     print("=" * 70)
     print()
     
@@ -250,16 +318,24 @@ def main():
     
     print(f"\n[INFO] Push de {len(TABLES_ORDRE)} tables en cours...")
     print(f"[INFO] Ordre: Dimensions puis Faits (pour respecter FK)")
+    print(f"[INFO] Mode: Traitement par BATCH (évite les erreurs de mémoire)")
     print()
+    
+    start_total = time.time()
     
     try:
         for idx, table in enumerate(TABLES_ORDRE, 1):
+            print(f"\n{'='*70}")
             print(f"[{idx}/{len(TABLES_ORDRE)}] {table}")
-            push_table(duck_conn, pg_conn, table)
+            print(f"{'='*70}")
+            push_table_batch(duck_conn, pg_conn, table)
+        
+        total_duration = time.time() - start_total
         
         print()
         print("=" * 70)
         print(f"[SUCCES] {len(TABLES_ORDRE)} tables poussees avec succes !")
+        print(f"[INFO] Temps total: {total_duration:.1f}s ({total_duration/60:.1f} minutes)")
         print("=" * 70)
         print()
         print("Verification dans PostgreSQL :")
@@ -283,4 +359,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

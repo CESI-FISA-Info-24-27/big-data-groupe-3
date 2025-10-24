@@ -64,7 +64,7 @@ fait_hospitalisation as (
     inner join dim_temps dt on h.date_entree = dt.date_complete
     
     -- Lookups optionnels (LEFT JOIN permet de gérer les valeurs manquantes avec COALESCE)
-    left join dim_etablissement de on h.finess_site = cast(de.finess as bigint)
+    left join dim_etablissement de on h.identifiant_organisation = de.finess
     left join dim_diagnostic dd on h.code_diagnostic = dd.code_diagnostic
     
     -- Localisation via établissement
