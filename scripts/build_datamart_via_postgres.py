@@ -770,7 +770,7 @@ def main():
             print("Vérification dans PostgreSQL :")
             print(f"  psql -h {POSTGRES_CONFIG['host']} -U {POSTGRES_CONFIG['user']} -d {POSTGRES_CONFIG['database']}")
             print(f"  \\dt {DATAMART_SCHEMA}.*")
-            print(f"  SELECT COUNT(*) FROM {DATAMART_SCHEMA}.dm_consultations_agregees;")
+            print(f"  SELECT COUNT(*) FROM {DATAMART_SCHEMA}.dm_consultations_analysis;")
         else:
             print(f"⚠️  {len(DATAMART_TABLES) - success_count} table(s) en échec")
         

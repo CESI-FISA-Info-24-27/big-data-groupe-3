@@ -179,3 +179,25 @@ sources:
       
       - name: satisfaction_esatis48h_mco_recueil2017_lexique
         description: "E-SATIS 48h MCO 2017 - Lexique (4 lignes)"
+
+      # ========================================
+      # Tables CSV - Satisfaction 2020
+      # ========================================
+      
+      - name: satisfaction_2020_lexique_esatis48h_mco_open_data_2020
+        description: "E-SATIS 48h MCO 2020 - Lexique"
+      
+      - name: satisfaction_2020_lexique_esatisca_mco_open_data_2020
+        description: "E-SATIS CA MCO 2020 - Lexique"
+      
+      - name: satisfaction_2020_lexique_iqss_open_data_2020
+        description: "IQSS 2020 - Lexique"
+      
+      - name: satisfaction_2020_resultats_esatis48h_mco_open_data_2020
+        description: "E-SATIS 48h MCO 2020 - Résultats (1150 lignes)"
+      
+      - name: satisfaction_2020_resultats_esatisca_mco_open_data_2020
+        description: "E-SATIS CA MCO 2020 - Résultats (931 lignes)"
+      
+      - name: satisfaction_2020_resultats_iqss_open_data_2020
+        description: "IQSS 2020 - Résultats (758 lignes)"

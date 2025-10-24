@@ -194,9 +194,10 @@ with DAG(
         ## Création Datamart (Optimisé)
         
         Crée le datamart directement dans PostgreSQL via extension DuckDB:
-        - dm_consultations_agregees (~45M lignes agrégées)
-        - dm_hospitalisations_agregees (~6K lignes)
-        - dm_analyse_territoriale (~30K lignes)
+        - dm_consultations_analysis
+        - dm_hospitalisations_analysis
+        - dm_deces_analysis
+        - dm_satisfaction_analysis
         
         **Méthode**: DuckDB extension postgres (pas de transfert de données)  
         **Temps estimé**: 6-8 minutes  

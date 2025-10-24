@@ -599,5 +599,149 @@ VALUES (
 
 
 -- ============================================
+-- DATAMARTS
+-- ============================================
+
+SET search_path TO datamart, public;
+
+-- ============================================
+-- SUPPRESSION DES TABLES (si elles existent)
+-- ============================================
+
+DROP TABLE IF EXISTS dm_consultations_analysis CASCADE;
+DROP TABLE IF EXISTS dm_hospitalisations_analysis CASCADE;
+DROP TABLE IF EXISTS dm_deces_analysis CASCADE;
+DROP TABLE IF EXISTS dm_satisfaction_analysis CASCADE;
+
+
+-- ========================================
+-- TABLE 1: dm_consultations_analysis
+-- ========================================
+
+create table dm_consultations_analysis (
+    sk_temps int,
+    sk_etablissement int,
+    sk_diagnostic int,
+    sk_professionnel int,
+    sk_patient int,
+    
+    date_complete date,
+    annee int,
+    trimestre int,
+    mois int,
+    
+    nom_etablissement varchar(255),
+    region_etablissement varchar(100),
+    type_etablissement varchar(50),
+    
+    code_diagnostic varchar(20),
+    libelle_diagnostic varchar(255),
+    categorie_diagnostic varchar(50),
+    
+    profession varchar(100),
+    specialite varchar(100),
+    
+    nombre_consultations int,
+    duree_consultation float,
+    
+    date_chargement timestamp
+);
+
+CREATE INDEX idx_dm_consultations_temps ON dm_consultations_analysis(sk_temps);
+CREATE INDEX idx_dm_consultations_etablissement ON dm_consultations_analysis(sk_etablissement);
+CREATE INDEX idx_dm_consultations_diagnostic ON dm_consultations_analysis(sk_diagnostic);
+CREATE INDEX idx_dm_consultations_professionnel ON dm_consultations_analysis(sk_professionnel);
+
+
+-- ========================================
+-- TABLE 2: dm_hospitalisations_analysis
+-- ========================================
+
+create table dm_hospitalisations_analysis (
+    sk_temps int,
+    sk_etablissement int,
+    sk_diagnostic int,
+    sk_patient int,
+    
+    date_complete date,
+    annee int,
+    trimestre int,
+    mois int,
+    
+    nom_etablissement varchar(255),
+    region_etablissement varchar(100),
+    
+    code_diagnostic varchar(20),
+    libelle_diagnostic varchar(255),
+    
+    sexe char(10),
+    tranche_age varchar(20),
+    
+    nombre_hospitalisations int,
+    jour_hospitalisation float,
+    
+    date_chargement timestamp
+);
+
+CREATE INDEX idx_dm_hospitalisations_temps ON dm_hospitalisations_analysis(sk_temps);
+CREATE INDEX idx_dm_hospitalisations_etablissement ON dm_hospitalisations_analysis(sk_etablissement);
+CREATE INDEX idx_dm_hospitalisations_diagnostic ON dm_hospitalisations_analysis(sk_diagnostic);
+CREATE INDEX idx_dm_hospitalisations_sexe_age ON dm_hospitalisations_analysis(sexe, tranche_age);
+
+
+-- ========================================
+-- TABLE 3: dm_deces_analysis
+-- ========================================
+
+create table dm_deces_analysis (
+    sk_temps int,
+    annee int,
+    trimestre int,
+    mois int,
+    date_complete date,
+    
+    region varchar(100),
+    departement varchar(100),
+    
+    nb_deces_departement int,
+    
+    date_chargement timestamp
+);
+
+CREATE INDEX idx_dm_deces_temps ON dm_deces_analysis(sk_temps);
+CREATE INDEX idx_dm_deces_region ON dm_deces_analysis(region);
+
+
+-- ========================================
+-- TABLE 4: dm_satisfaction_analysis
+-- ========================================
+
+create table dm_satisfaction_analysis (
+    sk_temps int,
+    annee int,
+    trimestre int,
+    mois int,
+    date_complete date,
+    
+    region varchar(100),
+    
+    nb_etablissements_region int,
+    nb_reponses_totales_region int,
+    
+    taux_satisfaction_moyen_region float,
+    taux_recommandation_moyen_region float,
+    
+    note_min_region float,
+    note_max_region float,
+    note_moyenne_simple_region float,
+    
+    date_chargement timestamp
+);
+
+CREATE INDEX idx_dm_satisfaction_region ON dm_satisfaction_analysis(region);
+CREATE INDEX idx_dm_satisfaction_temps ON dm_satisfaction_analysis(sk_temps);
+
+
+-- ============================================
 -- FIN DU SCRIPT MLD
 -- ============================================
