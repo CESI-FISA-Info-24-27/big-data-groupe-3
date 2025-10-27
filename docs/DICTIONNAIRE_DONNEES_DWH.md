@@ -1,1131 +1,603 @@
-# 📖 Dictionnaire de Données - DWH CHU
+# 📚 Dictionnaire de Données - DWH & DATAMART
 
-## 📋 Vue d'Ensemble
+## 🎯 Vue d'Ensemble
 
-Ce dictionnaire décrit toutes les tables du **Data Warehouse** (schéma `dwh` dans PostgreSQL).
+Ce dictionnaire de données fournit une documentation complète de toutes les tables, colonnes et relations du **Data Warehouse** et des **Datamarts** du projet CHU. Il sert de référence technique pour les développeurs, analystes et utilisateurs métier.
 
-**Architecture** : Modèle en Constellation (Star Schema)
-- **8 Dimensions** (tables de référence)
-- **5 Faits** (tables de mesures)
-- **4 Vues analytiques** (pour analyses rapides)
+### 📊 Architecture Globale
 
----
+```mermaid
+graph TB
+    subgraph "🏛️ DWH - Schéma Dimensionnel"
+        DIMS[8 Dimensions<br/>Clés substituts sk_*]
+        FAITS[5 Tables de Fait<br/>Métriques agrégables]
+    end
+    
+    subgraph "📊 DATAMART - Agrégations BI"
+        DM1[dm_consultations_analysis<br/>45M lignes]
+        DM2[dm_hospitalisations_analysis<br/>6K lignes] 
+        DM3[dm_analyse_territoriale<br/>30K lignes]
+        DM4[dm_satisfaction_analysis<br/>5K lignes]
+    end
+    
+    DIMS --> FAITS
+    FAITS --> DM1
+    FAITS --> DM2
+    FAITS --> DM3
+    FAITS --> DM4
+    
+    style DIMS fill:#e3f2fd
+    style FAITS fill:#fff3e0
+    style DM1 fill:#e8f5e8
+    style DM2 fill:#e8f5e8
+    style DM3 fill:#e8f5e8
+    style DM4 fill:#e8f5e8
+```
 
-## 📊 Tables du DWH
+## 🏛️ SCHÉMA DWH - DIMENSIONS
 
-### Résumé
+### 1. 🕐 `dim_temps` - Dimension Temporelle
 
-| Type | Tables | Volumétrie | Rafraîchissement |
-|------|--------|------------|------------------|
-| **Dimensions** | 8 | ~2M lignes | Mensuel |
-| **Faits** | 5 | ~27M lignes | Quotidien/Mensuel/Annuel |
-| **Vues** | 4 | Calculées | Temps réel |
-| **TOTAL** | 17 | ~29M lignes | - |
+**Description** : Référentiel temporel complet couvrant la période 2015-2030 avec calendrier français.
 
----
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_temps` | `BIGINT` | **PK, NOT NULL** | Clé substitut format YYYYMMDD | `20241207` |
+| `date_complete` | `DATE` | **UK, NOT NULL** | Date complète | `2024-12-07` |
+| `jour` | `INTEGER` | `1-31` | Jour du mois | `7` |
+| `mois` | `INTEGER` | `1-12` | Mois | `12` |
+| `trimestre` | `INTEGER` | `1-4` | Trimestre | `4` |
+| `semestre` | `INTEGER` | `1-2` | Semestre | `2` |
+| `annee` | `INTEGER` | `2015-2030` | Année | `2024` |
+| `semaine_annee` | `INTEGER` | `1-53` | Semaine ISO | `49` |
+| `jour_semaine` | `INTEGER` | `1-7` | Jour semaine (1=Lundi, 7=Dimanche) | `6` |
+| `nom_jour` | `VARCHAR(10)` |  | Nom jour français | `Samedi` |
+| `nom_mois` | `VARCHAR(10)` |  | Nom mois français | `Decembre` |
+| `est_weekend` | `BOOLEAN` |  | Weekend (samedi/dimanche) | `true` |
+| `est_ferie` | `BOOLEAN` |  | Jour férié français | `false` |
+| `saison` | `VARCHAR(10)` |  | Saison météorologique | `Hiver` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
 
-## 🔷 DIMENSIONS (Tables de Référence)
+**Volumétrie** : 5,845 lignes (2015-01-01 à 2030-12-31)  
+**Index principaux** : PK sur `sk_temps`, UK sur `date_complete`, Index sur `annee`
 
-### 1. `dim_patient` - Dimension Patient
+### 2. 👤 `dim_patient` - Dimension Patient (RGPD)
 
-**Description** : Patients du CHU avec informations démographiques et médicales
+**Description** : Patients anonymisés conformes RGPD avec hachage SHA-256 des données personnelles.
 
-**Type SCD** : Type 1 (pas d'historisation)
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_patient` | `INTEGER` | **PK, NOT NULL** | Clé substitut séquentielle | `12847` |
+| `id_patient` | `INTEGER` | **UK, NOT NULL** | Business key (pour jointures) | `PAT001234` |
+| `nom_hash` | `VARCHAR(64)` | **NOT NULL** | Nom anonymisé SHA-256 | `a7b8c9d0e1f2...` |
+| `prenom_hash` | `VARCHAR(64)` | **NOT NULL** | Prénom anonymisé SHA-256 | `f2e1d0c9b8a7...` |
+| `sexe` | `VARCHAR(1)` | `'M', 'F', 'I'` | Sexe (M/F/Inconnu) | `M` |
+| `date_naissance` | `DATE` |  | Date naissance (peut être tronquée RGPD) | `1985-06-15` |
+| `age` | `INTEGER` | `0-120` | Âge calculé | `39` |
+| `tranche_age` | `VARCHAR(10)` |  | Classification âge | `31-50` |
+| `groupe_sanguin` | `VARCHAR(3)` |  | Groupe sanguin | `A+` |
+| `poids` | `DECIMAL(5,2)` | `> 0` | Poids en kg | `75.50` |
+| `taille` | `INTEGER` | `> 0` | Taille en cm | `175` |
+| `code_postal` | `VARCHAR(5)` |  | Code postal résidence | `75001` |
+| `ville` | `VARCHAR(100)` |  | Ville résidence | `PARIS` |
+| `pays` | `VARCHAR(3)` | Default 'FR' | Pays ISO | `FR` |
+| `num_secu_hash` | `VARCHAR(64)` |  | Numéro sécurité sociale anonymisé | `1a2b3c4d5e6f...` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+| `date_modification` | `TIMESTAMP` | **NOT NULL** | Dernière modification | `2024-12-07 10:30:00` |
 
-**Alimentation** : Mensuelle
+**Volumétrie** : ~100,000 lignes  
+**Index principaux** : PK sur `sk_patient`, UK sur `id_patient`, Index sur `tranche_age`, `sexe`  
+**Conformité RGPD** : ✅ Anonymisation SHA-256, pseudonymisation irréversible
 
-**Volumétrie** : ~100,000 lignes
+### 3. 👨‍⚕️ `dim_professionnel` - Dimension Professionnel (SCD Type 2)
 
-#### Structure
+**Description** : Professionnels de santé avec historique des changements (Slowly Changing Dimension Type 2).
 
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_patient` | BIGSERIAL | PRIMARY KEY | **Clé substitut** (auto-générée) |
-| `id_patient` | INT | UNIQUE NOT NULL | **Business Key** (clé métier source) |
-| `nom_anonyme` | VARCHAR(8) | - | Nom hashé SHA-256 (8 car) - **RGPD** |
-| `prenom_anonyme` | VARCHAR(8) | - | Prénom hashé SHA-256 (8 car) - **RGPD** |
-| `sexe` | VARCHAR(10) | - | M/F/I (Inconnu) |
-| `date_naissance` | DATE | - | Date de naissance |
-| `age` | INT | - | Âge calculé (années) |
-| `tranche_age` | VARCHAR(20) | - | Catégorie : '0-18', '19-30', '31-50', '51-65', '66+' |
-| `groupe_sanguin` | VARCHAR(3) | - | A+, B-, O+, AB-, etc. |
-| `poids` | DECIMAL(5,2) | - | Poids en kg |
-| `taille` | INT | - | Taille en cm |
-| `code_postal` | VARCHAR(10) | - | Code postal |
-| `ville` | VARCHAR(100) | - | Ville de résidence |
-| `pays` | VARCHAR(2) | - | Code pays (FR par défaut) |
-| `num_secu_hash` | VARCHAR(64) | - | Numéro sécu hashé SHA-256 (64 car) - **RGPD** |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création de la ligne |
-| `date_modification` | TIMESTAMP | DEFAULT NOW() | Date de dernière modification |
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_professionnel` | `INTEGER` | **PK, NOT NULL** | Clé substitut unique par version | `45231` |
+| `identifiant` | `VARCHAR(20)` | **NOT NULL** | Business key professionnel | `PROF789012` |
+| `version_numero` | `INTEGER` | **NOT NULL** | Numéro version SCD Type 2 | `2` |
+| `nom` | `VARCHAR(100)` | **NOT NULL** | Nom professionnel | `DUPONT` |
+| `prenom` | `VARCHAR(100)` | **NOT NULL** | Prénom professionnel | `MARIE` |
+| `profession` | `VARCHAR(100)` | **NOT NULL** | Profession/grade | `Medecin Generaliste` |
+| `nom_specialite` | `VARCHAR(100)` |  | Spécialité médicale | `Medecine Generale` |
+| `mode_exercice_libelle` | `VARCHAR(20)` |  | Mode exercice | `LIBERAL` |
+| `etablissement_principal` | `VARCHAR(200)` |  | Établissement principal | `Cabinet Dr Dupont` |
+| `date_debut_exercice` | `DATE` |  | Début exercice | `2010-01-15` |
+| `date_debut_validite` | `TIMESTAMP` | **NOT NULL** | Début validité version SCD | `2024-01-01 00:00:00` |
+| `date_fin_validite` | `TIMESTAMP` |  | Fin validité version SCD (NULL si actuelle) | `NULL` |
+| `date_fin_exercice` | `DATE` |  | Fin exercice | `NULL` |
+| `est_actuel` | `BOOLEAN` | **NOT NULL** | Version actuelle (true/false) | `true` |
+| `fk_specialite` | `INTEGER` | **FK** | Clé étrangère vers dim_specialite | `12` |
+| `fk_etablissement` | `INTEGER` | **FK** | Clé étrangère vers dim_etablissement | `5678` |
+| `est_actif` | `BOOLEAN` |  | Professionnel actif | `true` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
 
-#### Index
+**Volumétrie** : ~1,200,000 lignes (avec historique)  
+**Index principaux** : PK sur `sk_professionnel`, Index sur `identifiant + est_actuel`, FK vers spécialités  
+**SCD Type 2** : ✅ Une version actuelle par professionnel, historique préservé
 
-- `PRIMARY KEY` : `sk_patient`
-- `UNIQUE` : `id_patient`
-- `INDEX` : `id_patient`, `sexe + tranche_age`
+### 4. 🏥 `dim_etablissement` - Dimension Établissement
 
-#### Business Rules
+**Description** : Établissements de santé français avec classification FINESS et géolocalisation.
 
-- ✅ Ligne "Inconnu" : `sk_patient = -1`
-- ✅ Anonymisation RGPD : Noms et num_secu hashés
-- ✅ Tranche d'âge calculée automatiquement
-- ✅ Pays par défaut = 'FR'
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_etablissement` | `INTEGER` | **PK, NOT NULL** | Clé substitut séquentielle | `98765` |
+| `finess` | `VARCHAR(20)` | **UK, NOT NULL** | Identifiant FINESS site | `750712184` |
+| `finess_etablissement_juridique` | `VARCHAR(20)` |  | FINESS entité juridique | `750100042` |
+| `finess_site` | `VARCHAR(20)` |  | FINESS site géographique | `750712184` |
+| `nom_etablissement` | `VARCHAR(200)` | **NOT NULL** | Raison sociale | `CHU Pitie-Salpetriere` |
+| `type_etablissement` | `VARCHAR(50)` |  | Classification automatique | `CHU` |
+| `categorie` | `VARCHAR(20)` |  | Secteur (Public/Privé/Médico-social) | `Public` |
+| `region` | `VARCHAR(50)` |  | Région administrative | `Ile-de-France` |
+| `departement` | `VARCHAR(3)` |  | Code département | `75` |
+| `ville` | `VARCHAR(100)` |  | Commune | `PARIS` |
+| `code_postal` | `VARCHAR(5)` |  | Code postal | `75013` |
+| `adresse` | `VARCHAR(300)` |  | Adresse complète | `47-83 Boulevard de l Hopital` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
 
-#### Exemple
+**Volumétrie** : ~416,000 lignes  
+**Index principaux** : PK sur `sk_etablissement`, UK sur `finess`, Index sur `region`, `type_etablissement`
+
+### 5. 🩺 `dim_diagnostic` - Dimension Diagnostic
+
+**Description** : Classifications diagnostiques CIM-10 avec chapitres et catégories.
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_diagnostic` | `INTEGER` | **PK, NOT NULL** | Clé substitut séquentielle | `1247` |
+| `code_diagnostic` | `VARCHAR(10)` | **UK, NOT NULL** | Code CIM-10 | `I21.9` |
+| `libelle_diagnostic` | `VARCHAR(300)` | **NOT NULL** | Libellé diagnostic | `Infarctus du myocarde, sans précision` |
+| `chapitre_cim10` | `VARCHAR(100)` |  | Chapitre CIM-10 | `Maladies de l'appareil circulatoire` |
+| `categorie_cim10` | `VARCHAR(50)` |  | Catégorie agrégée | `CARDIO_VASCULAIRE` |
+| `code_chapitre` | `VARCHAR(5)` |  | Code chapitre (I00-I99) | `IX` |
+| `est_actif` | `BOOLEAN` | Default true | Diagnostic valide | `true` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~15,000 lignes  
+**Index principaux** : PK sur `sk_diagnostic`, UK sur `code_diagnostic`, Index sur `chapitre_cim10`
+
+### 6. 🎯 `dim_specialite` - Dimension Spécialité
+
+**Description** : Spécialités médicales et fonctions des professionnels de santé.
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_specialite` | `INTEGER` | **PK, NOT NULL** | Clé substitut séquentielle | `42` |
+| `code_specialite` | `VARCHAR(10)` | **UK, NOT NULL** | Code spécialité | `MG` |
+| `specialite` | `VARCHAR(100)` | **NOT NULL** | Nom spécialité | `Medecine Generale` |
+| `fonction` | `VARCHAR(100)` |  | Fonction/grade | `Praticien` |
+| `famille_specialite` | `VARCHAR(50)` |  | Famille regroupée | `MEDECINE` |
+| `est_chirurgicale` | `BOOLEAN` |  | Spécialité chirurgicale | `false` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~94 lignes  
+**Index principaux** : PK sur `sk_specialite`, UK sur `code_specialite`
+
+### 7. 💳 `dim_mutuelle` - Dimension Mutuelle
+
+**Description** : Organismes d'assurance complémentaire et mutuelles.
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_mutuelle` | `INTEGER` | **PK, NOT NULL** | Clé substitut séquentielle | `187` |
+| `id_mut` | `INTEGER` | **UK, NOT NULL** | Identifiant mutuelle | `MUT456789` |
+| `nom_mutuelle` | `VARCHAR(200)` | **NOT NULL** | Nom organisme | `MGEN` |
+| `type_mutuelle` | `VARCHAR(50)` |  | Type organisme | `MUTUELLE` |
+| `categorie_organisme` | `VARCHAR(50)` |  | Catégorie | `MUTUELLE_COMPLEMENTAIRE` |
+| `est_actif` | `BOOLEAN` | Default true | Organisme actif | `true` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~255 lignes  
+**Index principaux** : PK sur `sk_mutuelle`, UK sur `id_mut`
+
+### 8. 🗺️ `dim_localisation` - Dimension Localisation
+
+**Description** : Référentiel géographique français (régions, départements, communes).
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_localisation` | `INTEGER` | **PK, NOT NULL** | Clé substitut séquentielle | `3421` |
+| `code_postal` | `VARCHAR(5)` | **NOT NULL** | Code postal | `69001` |
+| `commune` | `VARCHAR(100)` | **NOT NULL** | Nom commune | `LYON` |
+| `departement` | `VARCHAR(3)` | **NOT NULL** | Code département | `69` |
+| `region` | `VARCHAR(50)` |  | Région administrative | `Auvergne-Rhone-Alpes` |
+| `zone_geographique` | `VARCHAR(30)` |  | Zone géographique | `FRANCE_METROPOLITAINE` |
+| `sous_region_corse` | `VARCHAR(30)` |  | Spécificité Corse | `NULL` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : Variable selon granularité  
+**Index principaux** : PK sur `sk_localisation`, Index sur `region`, `departement`
+
+## ⚡ SCHÉMA DWH - TABLES DE FAIT
+
+### 1. 🩺 `fait_consultation` - Fait Consultations
+
+**Description** : Table de fait principale des consultations médicales (grain : 1 consultation).
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_fait_consultation` | `INTEGER` | **PK, NOT NULL** | Clé substitut du fait | `892456` |
+| `sk_patient` | `INTEGER` | **FK, NOT NULL** | → dim_patient | `12847` |
+| `sk_professionnel` | `INTEGER` | **FK** | → dim_professionnel (-1 si inconnu) | `45231` |
+| `sk_diagnostic` | `INTEGER` | **FK** | → dim_diagnostic (-1 si inconnu) | `1247` |
+| `sk_mutuelle` | `INTEGER` | **FK** | → dim_mutuelle (-1 si inconnu) | `187` |
+| `sk_etablissement` | `INTEGER` | **FK** | → dim_etablissement (-1 si inconnu) | `98765` |
+| `sk_temps` | `INTEGER` | **FK, NOT NULL** | → dim_temps | `20241207` |
+| `num_consultation` | `VARCHAR(20)` |  | Numéro consultation (dimension dégénérée) | `CONS2024120701` |
+| `heure_debut` | `TIME` |  | Heure début consultation | `14:30:00` |
+| `heure_fin` | `TIME` |  | Heure fin consultation | `15:15:00` |
+| `motif` | `VARCHAR(200)` |  | Motif consultation | `Controle routine` |
+| `duree_consultation` | `INTEGER` | **MESURE** | Durée en minutes | `45` |
+| `nombre_consultations` | `INTEGER` | **MESURE** | Constante = 1 pour agrégations | `1` |
+| `consultation_longue` | `INTEGER` | **MESURE** | 1 si durée >= 30min, 0 sinon | `1` |
+| `consultation_pediatrie` | `INTEGER` | **MESURE** | 1 si patient < 18 ans, 0 sinon | `0` |
+| `consultation_geriatrie` | `INTEGER` | **MESURE** | 1 si patient > 65 ans, 0 sinon | `0` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~1,000,000 lignes  
+**Index principaux** : PK sur `sk_fait_consultation`, FK sur toutes dimensions, Index sur `sk_temps`  
+**Partitioning** : Par `sk_temps` (mensuel recommandé)
+
+### 2. 🛏️ `fait_hospitalisation` - Fait Hospitalisations
+
+**Description** : Table de fait des séjours hospitaliers (grain : 1 séjour).
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_fait_hospitalisation` | `INTEGER` | **PK, NOT NULL** | Clé substitut du fait | `5432` |
+| `sk_patient` | `INTEGER` | **FK, NOT NULL** | → dim_patient | `12847` |
+| `sk_etablissement` | `INTEGER` | **FK, NOT NULL** | → dim_etablissement | `98765` |
+| `sk_diagnostic` | `INTEGER` | **FK** | → dim_diagnostic (-1 si inconnu) | `1247` |
+| `sk_temps` | `INTEGER` | **FK, NOT NULL** | → dim_temps (date entrée) | `20241207` |
+| `num_sejour` | `VARCHAR(20)` |  | Numéro séjour (dimension dégénérée) | `SEJ2024120701` |
+| `date_entree` | `DATE` |  | Date entrée hospitalisation | `2024-12-07` |
+| `date_sortie` | `DATE` |  | Date sortie hospitalisation | `2024-12-10` |
+| `nombre_hospitalisations` | `INTEGER` | **MESURE** | Constante = 1 pour agrégations | `1` |
+| `jour_hospitalisation` | `INTEGER` | **MESURE** | Durée séjour en jours | `3` |
+| `sejour_ambulatoire` | `INTEGER` | **MESURE** | 1 si ambulatoire (0 jour), 0 sinon | `0` |
+| `sejour_long` | `INTEGER` | **MESURE** | 1 si > 7 jours, 0 sinon | `0` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~2,500 lignes  
+**Index principaux** : PK sur `sk_fait_hospitalisation`, FK sur toutes dimensions
+
+### 3. 💀 `fait_deces` - Fait Décès
+
+**Description** : Table de fait de la mortalité française (grain : 1 décès).
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_fait_deces` | `INTEGER` | **PK, NOT NULL** | Clé substitut du fait | `12543987` |
+| `sk_temps` | `INTEGER` | **FK, NOT NULL** | → dim_temps (date décès) | `20241207` |
+| `sk_localisation` | `INTEGER` | **FK** | → dim_localisation (-1 si inconnu) | `3421` |
+| `sk_patient` | `INTEGER` | **FK** | → dim_patient (-1 si pas de match) | `-1` |
+| `numero_acte_deces` | `VARCHAR(20)` |  | Numéro acte décès (dimension dégénérée) | `DEC2024120701` |
+| `code_lieu_deces` | `VARCHAR(10)` |  | Code lieu décès | `69001` |
+| `sexe_code` | `INTEGER` |  | Code sexe (1=M, 2=F) | `1` |
+| `age_deces` | `INTEGER` |  | Âge au décès | `78` |
+| `classe_mortalite` | `VARCHAR(30)` |  | Classification épidémiologique | `MORTALITE_SENIOR` |
+| `nombre_deces` | `INTEGER` | **MESURE** | Constante = 1 pour agrégations | `1` |
+| `deces_hommes` | `INTEGER` | **MESURE** | 1 si homme, 0 sinon | `1` |
+| `deces_femmes` | `INTEGER` | **MESURE** | 1 si femme, 0 sinon | `0` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~25,000,000 lignes  
+**Index principaux** : PK sur `sk_fait_deces`, FK sur dimensions, **PARTITIONING OBLIGATOIRE** par `sk_temps`
+
+### 4. 😊 `fait_satisfaction` - Fait Satisfaction
+
+**Description** : Table de fait de la satisfaction patients E-SATIS (grain : 1 établissement/année).
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_fait_satisfaction` | `INTEGER` | **PK, NOT NULL** | Clé substitut du fait | `4521` |
+| `sk_etablissement` | `INTEGER` | **FK, NOT NULL** | → dim_etablissement | `98765` |
+| `sk_temps` | `INTEGER` | **FK, NOT NULL** | → dim_temps (année enquête) | `20240101` |
+| `finess` | `VARCHAR(20)` |  | FINESS établissement (dimension dégénérée) | `750712184` |
+| `annee_enquete` | `INTEGER` |  | Année enquête | `2024` |
+| `type_enquete` | `VARCHAR(20)` |  | Type enquête (E-SATIS 48h, CA...) | `E-SATIS_48H` |
+| `score_global` | `DECIMAL(5,2)` | **MESURE** | Score satisfaction global (0-100) | `78.5` |
+| `score_accueil` | `DECIMAL(5,2)` | **MESURE** | Score accueil | `80.2` |
+| `score_prise_charge` | `DECIMAL(5,2)` | **MESURE** | Score prise en charge | `76.8` |
+| `score_information` | `DECIMAL(5,2)` | **MESURE** | Score information | `75.1` |
+| `score_chambre` | `DECIMAL(5,2)` | **MESURE** | Score chambre | `82.3` |
+| `score_repas` | `DECIMAL(5,2)` | **MESURE** | Score repas | `68.9` |
+| `score_sortie` | `DECIMAL(5,2)` | **MESURE** | Score sortie | `79.4` |
+| `nombre_reponses` | `INTEGER` | **MESURE** | Nombre réponses enquête | `245` |
+| `taux_participation` | `DECIMAL(5,2)` | **MESURE** | Taux participation (%) | `67.8` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~5,000 lignes  
+**Index principaux** : PK sur `sk_fait_satisfaction`, FK sur dimensions, Index sur `annee_enquete`
+
+### 5. ⚕️ `fait_qualite_soins` - Fait Qualité Soins
+
+**Description** : Table de fait des indicateurs qualité IPAQSS (grain : 1 établissement/année/indicateur).
+
+| **Colonne** | **Type** | **Contrainte** | **Description** | **Exemple** |
+|-------------|----------|----------------|-----------------|-------------|
+| `sk_fait_qualite` | `INTEGER` | **PK, NOT NULL** | Clé substitut du fait | `7892` |
+| `sk_etablissement` | `INTEGER` | **FK, NOT NULL** | → dim_etablissement | `98765` |
+| `sk_temps` | `INTEGER` | **FK, NOT NULL** | → dim_temps (année indicateur) | `20240101` |
+| `finess` | `VARCHAR(20)` |  | FINESS établissement | `750712184` |
+| `annee_indicateur` | `INTEGER` |  | Année indicateur | `2024` |
+| `code_indicateur` | `VARCHAR(20)` |  | Code indicateur IPAQSS | `ICALIN` |
+| `libelle_indicateur` | `VARCHAR(200)` |  | Libellé indicateur | `Infections associées aux soins` |
+| `famille_indicateur` | `VARCHAR(50)` |  | Famille indicateur | `INFECTIONS` |
+| `valeur_indicateur` | `DECIMAL(10,4)` | **MESURE** | Valeur mesurée | `2.45` |
+| `seuil_alerte` | `DECIMAL(10,4)` |  | Seuil d'alerte | `5.00` |
+| `classe_indicateur` | `VARCHAR(20)` |  | Classification (A, B, C) | `A` |
+| `nombre_indicateurs` | `INTEGER` | **MESURE** | Constante = 1 pour agrégations | `1` |
+| `indicateur_conforme` | `INTEGER` | **MESURE** | 1 si conforme, 0 sinon | `1` |
+| `date_chargement` | `TIMESTAMP` | **NOT NULL** | Métadonnée technique | `2024-12-07 10:30:00` |
+
+**Volumétrie** : ~3,000 lignes  
+**Index principaux** : PK sur `sk_fait_qualite`, FK sur dimensions, Index sur `famille_indicateur`
+
+## 📊 SCHÉMA DATAMART - TABLES AGRÉGÉES
+
+### 1. 📈 `dm_consultations_analysis` - Analyses Consultations
+
+**Description** : Datamart pré-agrégé pour analyses consultations multi-dimensionnelles (optimisé Power BI).
+
+#### 🔑 Clés et Dimensions
+
+| **Colonne** | **Type** | **Description** | **Usage BI** |
+|-------------|----------|-----------------|--------------|
+| `sk_temps` | `INTEGER` | Clé temporelle | Filtres dates |
+| `sk_etablissement` | `INTEGER` | Clé établissement | Analyses territoriales |
+| `sk_diagnostic` | `INTEGER` | Clé diagnostic | Analyses pathologies |
+| `sk_professionnel` | `INTEGER` | Clé professionnel | Analyses activité praticiens |
+| `date_complete` | `DATE` | Date complète | Axes temporels |
+| `annee` | `INTEGER` | Année | Comparaisons annuelles |
+| `trimestre` | `INTEGER` | Trimestre | Saisonnalité |
+| `mois` | `INTEGER` | Mois | Tendances mensuelles |
+| `nom_mois` | `VARCHAR(10)` | Nom mois français | Labels graphiques |
+| `est_weekend` | `BOOLEAN` | Weekend/semaine | Analyses temporelles |
+
+#### 📊 Dimensions Descriptives
+
+| **Colonne** | **Type** | **Description** | **Usage BI** |
+|-------------|----------|-----------------|--------------|
+| `nom_etablissement` | `VARCHAR(200)` | Nom établissement | Labels, regroupements |
+| `region_etablissement` | `VARCHAR(50)` | Région établissement | Analyses territoriales |
+| `code_diagnostic` | `VARCHAR(10)` | Code CIM-10 | Filtres diagnostics |
+| `libelle_diagnostic` | `VARCHAR(300)` | Libellé diagnostic | Labels diagnostics |
+| `chapitre_cim10` | `VARCHAR(100)` | Chapitre CIM-10 | Regroupements pathologies |
+| `specialite` | `VARCHAR(100)` | Spécialité médicale | Analyses spécialités |
+| `fonction` | `VARCHAR(100)` | Fonction praticien | Classifications |
+| `sexe` | `VARCHAR(1)` | Sexe patient | Analyses démographiques |
+| `tranche_age` | `VARCHAR(10)` | Tranche âge patient | Segmentation âge |
+
+#### ⚡ Mesures Pré-Calculées
+
+| **Colonne** | **Type** | **Description** | **Formule/Usage** |
+|-------------|----------|-----------------|-------------------|
+| `nb_consultations_etablissement` | `INTEGER` | Total consultations par établissement/temps | `SUM(nombre_consultations) GROUP BY etablissement, temps` |
+| `duree_totale_etablissement` | `INTEGER` | Durée totale (minutes) par établissement | `SUM(duree_consultation) GROUP BY etablissement` |
+| `nb_patients_uniques_etablissement` | `INTEGER` | Patients uniques par établissement | `COUNT(DISTINCT patient) GROUP BY etablissement` |
+| `nb_consultations_diagnostic` | `INTEGER` | Total consultations par diagnostic | `SUM(nombre_consultations) GROUP BY diagnostic` |
+| `duree_moyenne_diagnostic` | `DECIMAL(8,2)` | Durée moyenne par diagnostic | `AVG(duree_consultation) GROUP BY diagnostic` |
+| `nb_consultations_professionnel` | `INTEGER` | Total consultations par professionnel | `SUM(nombre_consultations) GROUP BY professionnel` |
+| `nb_patients_uniques_professionnel` | `INTEGER` | Patients uniques par professionnel | `COUNT(DISTINCT patient) GROUP BY professionnel` |
+| `nb_consultations_profil` | `INTEGER` | Total consultations par profil patient | `SUM(nombre_consultations) GROUP BY sexe, age` |
+
+**Volumétrie** : ~45,000,000 lignes  
+**Performance** : Requêtes Power BI < 1 seconde  
+**Partitioning** : Par `annee` recommandé
+
+### 2. 🏥 `dm_hospitalisations_analysis` - Analyses Hospitalisations
+
+**Description** : Datamart pré-agrégé pour analyses séjours hospitaliers et durées.
+
+#### ⚡ Mesures Clés Hospitalières
+
+| **Colonne** | **Type** | **Description** | **KPI Métier** |
+|-------------|----------|-----------------|----------------|
+| `total_hospitalisations_etablissement` | `INTEGER` | Total hospitalisations établissement | Volume activité |
+| `total_jours_etablissement` | `INTEGER` | Total jours hospitalisation | Occupation lits |
+| `duree_moyenne_etablissement` | `DECIMAL(8,2)` | DMS (Durée Moyenne Séjour) | **KPI Principal** |
+| `duree_mediane_etablissement` | `DECIMAL(8,2)` | Durée médiane séjour | Indicateur robuste |
+| `nb_ambulatoire_etablissement` | `INTEGER` | Nombre séjours ambulatoires | Activité ambulatoire |
+| `nb_court_sejour_etablissement` | `INTEGER` | Nombre courts séjours (1j) | Chirurgie jour |
+| `nb_sejour_normal_etablissement` | `INTEGER` | Nombre séjours normaux (2-7j) | Activité standard |
+| `nb_sejour_long_etablissement` | `INTEGER` | Nombre séjours longs (>7j) | Pathologies lourdes |
+| `taux_occupation_etablissement` | `DECIMAL(5,2)` | Taux occupation approximatif (%) | **KPI Gestion** |
+| `hospitalisations_par_patient` | `DECIMAL(8,2)` | Ratio hospitalisations/patient | Récurrence |
+
+**Volumétrie** : ~6,000 lignes  
+**Utilisation** : Dashboards gestion hospitalière, pilotage DMS
+
+### 3. 🗺️ `dm_analyse_territoriale` - Analyses Territoriales
+
+**Description** : Datamart épidémiologique croisant mortalité et satisfaction par territoire.
+
+#### 🌍 Indicateurs Épidémiologiques
+
+| **Colonne** | **Type** | **Description** | **Usage Épidémiologique** |
+|-------------|----------|-----------------|---------------------------|
+| `region` | `VARCHAR(50)` | Région France | Comparaisons territoriales |
+| `nb_deces_region` | `INTEGER` | Nombre décès région/temps | Mortalité absolue |
+| `nb_deces_hommes` | `INTEGER` | Décès masculins | Répartition sexe |
+| `nb_deces_femmes` | `INTEGER` | Décès féminins | Répartition sexe |
+| `nb_deces_0_18_ans` | `INTEGER` | Décès pédiatriques | Mortalité infantile |
+| `nb_deces_66_plus_ans` | `INTEGER` | Décès seniors | Mortalité âgée |
+| `taux_masculinite_deces` | `DECIMAL(5,2)` | % décès masculins | Indicateur démographique |
+| `taux_deces_seniors` | `DECIMAL(5,2)` | % décès >66 ans | Vieillissement population |
+
+#### 😊 Indicateurs Satisfaction Territoriale
+
+| **Colonne** | **Type** | **Description** | **Usage Qualité** |
+|-------------|----------|-----------------|-------------------|
+| `note_moyenne_satisfaction` | `DECIMAL(5,2)` | Satisfaction moyenne région | **KPI Territorial** |
+| `nb_etablissements_evalues` | `INTEGER` | Établissements avec enquête | Couverture évaluation |
+| `satisfaction_chu` | `DECIMAL(5,2)` | Satisfaction CHU région | Performance CHU |
+| `satisfaction_hopital_public` | `DECIMAL(5,2)` | Satisfaction hôpitaux publics | Performance public |
+| `satisfaction_clinique_privee` | `DECIMAL(5,2)` | Satisfaction cliniques privées | Performance privé |
+| `niveau_satisfaction_regional` | `VARCHAR(30)` | Classification qualité région | Segmentation |
+
+#### 📊 Indicateurs Combinés
+
+| **Colonne** | **Type** | **Description** | **Innovation** |
+|-------------|----------|-----------------|----------------|
+| `completude_donnees_territoriales` | `VARCHAR(30)` | Disponibilité données territoire | Qualité analyse |
+| `score_territorial_global` | `DECIMAL(5,2)` | Score pondéré mortalité + satisfaction | **Indicateur Unique** |
+
+**Volumétrie** : ~30,000 lignes  
+**Innovation** : Premier croisement mortalité/satisfaction par territoire
+
+### 4. 📋 `dm_satisfaction_analysis` - Analyses Satisfaction
+
+**Description** : Datamart consolidation satisfaction patients et qualité soins par établissement.
+
+#### 😊 Mesures Satisfaction Détaillées
+
+| **Colonne** | **Type** | **Description** | **Périmètre** |
+|-------------|----------|-----------------|---------------|
+| `score_global_satisfaction` | `DECIMAL(5,2)` | Score global établissement | E-SATIS toutes enquêtes |
+| `score_accueil_moyen` | `DECIMAL(5,2)` | Satisfaction accueil | Première impression |
+| `score_information_moyen` | `DECIMAL(5,2)` | Qualité information | Communication |
+| `nb_reponses_total` | `INTEGER` | Total réponses enquêtes | Volume participation |
+| `nb_types_enquetes` | `INTEGER` | Types enquêtes disponibles | Couverture évaluation |
+| `niveau_satisfaction_etablissement` | `VARCHAR(30)` | Classification établissement | Segmentation performance |
+
+**Volumétrie** : ~5,000 lignes  
+**Utilisation** : Pilotage qualité établissements, benchmarking
+
+## 🔗 Relations et Contraintes
+
+### 🔑 Intégrité Référentielle DWH
 
 ```sql
-sk_patient | id_patient | nom_anonyme | sexe | age | tranche_age | groupe_sanguin | num_secu_hash
------------|------------|-------------|------|-----|-------------|----------------|---------------
--1         | -1         | INCONNU     | I    | 0   | Non renseigne| ?              | NULL
-1          | 1001       | a3f2d1c8    | M    | 44  | 31-50       | A+             | 5e884898da...
-2          | 1002       | 9b4e6f2a    | F    | 28  | 19-30       | O+             | 7f9a2b1c3d...
+-- Contraintes clés étrangères principales
+ALTER TABLE dwh.fait_consultation 
+    ADD CONSTRAINT fk_consultation_patient 
+    FOREIGN KEY (sk_patient) REFERENCES dwh.dim_patient(sk_patient);
+
+ALTER TABLE dwh.fait_consultation 
+    ADD CONSTRAINT fk_consultation_temps 
+    FOREIGN KEY (sk_temps) REFERENCES dwh.dim_temps(sk_temps);
+
+ALTER TABLE dwh.dim_professionnel 
+    ADD CONSTRAINT fk_professionnel_specialite 
+    FOREIGN KEY (fk_specialite) REFERENCES dwh.dim_specialite(sk_specialite);
 ```
 
----
+### ⚠️ Valeurs Spéciales
 
-### 2. `dim_professionnel` - Dimension Professionnel de Santé
+| **Valeur** | **Signification** | **Usage** |
+|------------|------------------|-----------|
+| `-1` | Inconnu/Non renseigné | Clés étrangères optionnelles |
+| `0` | Valeur par défaut | Mesures nulles |
+| `NULL` | Non applicable | Champs optionnels |
 
-**Description** : Professionnels de santé avec historisation des changements
+### 📊 Cardinalités Principales
 
-**Type SCD** : Type 2 (historisation complète)
+| **Relation** | **Cardinalité** | **Description** |
+|--------------|----------------|-----------------|
+| dim_patient → fait_consultation | 1:N | Un patient → plusieurs consultations |
+| dim_professionnel → fait_consultation | 1:N | Un professionnel → plusieurs consultations |
+| dim_temps → fait_* | 1:N | Une date → plusieurs événements |
+| dim_specialite → dim_professionnel | 1:N | Une spécialité → plusieurs professionnels |
 
-**Alimentation** : Mensuelle
+## 🛡️ Sécurité et Conformité
 
-**Volumétrie** : ~1,048,575 lignes
+### 🔒 Conformité RGPD
 
-#### Structure
+| **Élément** | **Statut** | **Méthode** | **Vérification** |
+|-------------|------------|-------------|------------------|
+| **Noms patients** | ✅ Anonymisé | SHA-256 64 caractères | `LENGTH(nom_hash) = 64` |
+| **Prénoms patients** | ✅ Anonymisé | SHA-256 64 caractères | `LENGTH(prenom_hash) = 64` |
+| **N° Sécurité Sociale** | ✅ Anonymisé | SHA-256 64 caractères | `LENGTH(num_secu_hash) = 64` |
+| **Dates naissance** | ⚠️ Tronquables | Selon politique RGPD | Configuration variable |
+| **Adresses** | ✅ Ville/CP uniquement | Pas d'adresse complète | Géolocalisation générale |
 
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_professionnel` | BIGSERIAL | PRIMARY KEY | **Clé substitut** (auto-générée, unique) |
-| `identifiant` | VARCHAR(20) | NOT NULL | **Business Key** (RPPS/ADELI) - **Peut se répéter** |
-| `civilite` | VARCHAR(10) | - | M./Mme/Dr/Pr |
-| `nom_anonyme` | VARCHAR(8) | - | Nom hashé SHA-256 (8 car) - **RGPD** |
-| `prenom_anonyme` | VARCHAR(8) | - | Prénom hashé SHA-256 (8 car) - **RGPD** |
-| `profession` | VARCHAR(100) | - | Médecin, Infirmier, Pharmacien, etc. |
-| `categorie_professionnelle` | VARCHAR(50) | - | Libéral, Salarié, etc. |
-| `fk_specialite` | BIGINT | FK → dim_specialite | **Clé étrangère** vers spécialité |
-| `mode_exercice` | VARCHAR(20) | - | Libéral/Salarié/Mixte |
-| `fk_organisation` | VARCHAR(20) | - | FINESS établissement principal |
-| `date_debut_validite` | DATE | NOT NULL | **SCD Type 2** : Début période validité |
-| `date_fin_validite` | DATE | - | **SCD Type 2** : Fin période (NULL = actuel) |
-| `est_actuel` | BOOLEAN | DEFAULT TRUE | **SCD Type 2** : TRUE si version actuelle |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création de la ligne |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_professionnel`
-- `INDEX` : `identifiant`, `est_actuel (WHERE TRUE)`, `fk_organisation`
-
-#### Business Rules (SCD Type 2)
-
-- ✅ Ligne "Inconnu" : `sk_professionnel = -1`
-- ✅ Un identifiant peut avoir **plusieurs versions** (historique)
-- ✅ `est_actuel = TRUE` : Version actuelle
-- ✅ `date_fin_validite = NULL` : Version actuelle
-- ✅ Nouvelle version créée si changement de spécialité/établissement
-
-#### Exemple SCD Type 2
+### 🔑 Contrôle d'Accès
 
 ```sql
--- Historique du professionnel RPPS 123456
-sk_professionnel | identifiant | nom_anonyme | fk_specialite | date_debut    | date_fin   | est_actuel
------------------|-------------|-------------|---------------|---------------|------------|------------
-142              | 123456      | a3f2d1c8    | 5 (Cardio)    | 2020-01-01    | 2023-06-30 | FALSE
-857              | 123456      | a3f2d1c8    | 12 (Chirurgie)| 2023-07-01    | NULL       | TRUE
+-- Exemple politiques d'accès (à implémenter selon besoins)
+-- Analystes : Lecture DATAMART uniquement
+GRANT SELECT ON SCHEMA datamart TO role_analystes;
 
--- Requête version actuelle
-SELECT * FROM dim_professionnel WHERE identifiant = '123456' AND est_actuel = TRUE;
--- → sk_professionnel = 857
+-- Développeurs : Lecture DWH + DATAMART  
+GRANT SELECT ON SCHEMA dwh TO role_developpeurs;
+GRANT SELECT ON SCHEMA datamart TO role_developpeurs;
 
--- Requête version à une date donnée (2022-03-15)
-SELECT * FROM dim_professionnel 
-WHERE identifiant = '123456' 
-  AND date_debut_validite <= '2022-03-15'
-  AND (date_fin_validite >= '2022-03-15' OR date_fin_validite IS NULL);
--- → sk_professionnel = 142 (il était cardiologue en 2022)
+-- Administrateurs : Accès complet
+GRANT ALL ON SCHEMA dwh TO role_admin;
+GRANT ALL ON SCHEMA datamart TO role_admin;
 ```
 
----
+## 📈 Performance et Optimisations
 
-### 3. `dim_temps` - Dimension Temporelle
+### 🚀 Index Stratégiques
 
-**Description** : Calendrier complet avec jours fériés français
+#### DWH (PostgreSQL)
+```sql
+-- Index dimensions (clés substituts + business keys)
+CREATE UNIQUE INDEX uk_dim_patient_id ON dwh.dim_patient(id_patient);
+CREATE INDEX idx_dim_patient_tranche_age ON dwh.dim_patient(tranche_age);
+CREATE INDEX idx_dim_temps_annee ON dwh.dim_temps(annee);
 
-**Type SCD** : Non applicable (dimension de référence fixe)
+-- Index faits (clés étrangères + partitioning)
+CREATE INDEX idx_fait_consultation_temps ON dwh.fait_consultation(sk_temps);
+CREATE INDEX idx_fait_consultation_patient ON dwh.fait_consultation(sk_patient);
+CREATE INDEX idx_fait_deces_temps_local ON dwh.fait_deces(sk_temps, sk_localisation);
+```
 
-**Alimentation** : Unique (pré-génération 2015-2030)
+#### DATAMART (PostgreSQL)
+```sql
+-- Index optimisés Power BI
+CREATE INDEX idx_dm_consultations_annee_region ON datamart.dm_consultations_analysis(annee, region_etablissement);
+CREATE INDEX idx_dm_consultations_specialite ON datamart.dm_consultations_analysis(specialite);
+CREATE INDEX idx_dm_hospitalisations_etablissement ON datamart.dm_hospitalisations_analysis(nom_etablissement);
+```
 
-**Volumétrie** : 5,845 lignes (16 ans × 365.25 jours)
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_temps` | BIGINT | PRIMARY KEY | **Clé substitut** format YYYYMMDD (ex: 20230515) |
-| `date_complete` | DATE | UNIQUE NOT NULL | **Business Key** (date complète) |
-| `jour` | INT | NOT NULL | Jour du mois (1-31) |
-| `mois` | INT | NOT NULL | Mois (1-12) |
-| `trimestre` | INT | NOT NULL | Trimestre (1-4) |
-| `semestre` | INT | NOT NULL | Semestre (1-2) |
-| `annee` | INT | NOT NULL | Année (2015-2030) |
-| `semaine_annee` | INT | NOT NULL | Semaine de l'année (1-53) |
-| `jour_semaine` | INT | NOT NULL | Jour de la semaine (1=Lundi, 7=Dimanche) |
-| `nom_jour` | VARCHAR(10) | - | Lundi, Mardi, etc. |
-| `nom_mois` | VARCHAR(20) | - | Janvier, Février, etc. |
-| `est_weekend` | BOOLEAN | - | TRUE si samedi ou dimanche |
-| `est_ferie` | BOOLEAN | - | TRUE si jour férié français |
-| `saison` | VARCHAR(20) | - | Printemps/Été/Automne/Hiver |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_temps`
-- `UNIQUE` : `date_complete`
-- `INDEX` : `date_complete`, `annee + mois`, `annee + trimestre`
-
-#### Business Rules
-
-- ✅ Ligne "Inconnu" : `sk_temps = -1`
-- ✅ Jours fériés français : 1er janvier, 1er mai, 8 mai, 14 juillet, 15 août, 1er novembre, 11 novembre, 25 décembre
-- ✅ Weekend : Samedi (6) et Dimanche (7)
-- ✅ Clé format YYYYMMDD pour faciliter les tris
-
-#### Exemple
+### 📊 Partitioning Recommandé
 
 ```sql
-sk_temps | date_complete | jour | mois | trimestre | annee | jour_semaine | nom_jour | est_weekend | est_ferie
----------|---------------|------|------|-----------|-------|--------------|----------|-------------|----------
--1       | NULL          | 0    | 0    | 0         | 0     | 0            | Inconnu  | FALSE       | FALSE
-20230101 | 2023-01-01    | 1    | 1    | 1         | 2023  | 7            | Dimanche | TRUE        | TRUE (Jour de l'An)
-20230515 | 2023-05-15    | 15   | 5    | 2         | 2023  | 1            | Lundi    | FALSE       | FALSE
-20231225 | 2023-12-25    | 25   | 12   | 4         | 2023  | 1            | Lundi    | FALSE       | TRUE (Noël)
+-- Partitioning fait_deces (obligatoire - 25M+ lignes)
+CREATE TABLE dwh.fait_deces_2024 PARTITION OF dwh.fait_deces
+FOR VALUES FROM (20240101) TO (20250101);
+
+-- Partitioning dm_consultations_analysis (recommandé - 45M+ lignes)  
+CREATE TABLE datamart.dm_consultations_analysis_2024 PARTITION OF datamart.dm_consultations_analysis
+FOR VALUES FROM (2024) TO (2025);
 ```
 
----
+## 📋 Maintenance et Evolution
 
-### 4. `dim_specialite` - Dimension Spécialité Médicale
+### 🔄 Tâches de Maintenance
 
-**Description** : Référentiel des spécialités médicales avec classification
+| **Fréquence** | **Tâche** | **Commande** |
+|---------------|-----------|--------------|
+| **Quotidien** | Statistiques PostgreSQL | `ANALYZE dwh.*, datamart.*;` |
+| **Hebdomadaire** | Vacuum automatique | Configuration PostgreSQL |
+| **Mensuel** | Vérification contraintes | Scripts validation custom |
+| **Annuel** | Archivage données anciennes | Selon politique rétention |
 
-**Type SCD** : Type 1 (pas d'historisation)
+### 📈 Evolution Schéma
 
-**Alimentation** : Mensuelle
+#### Ajout Nouvelle Dimension
+1. Créer `dim_nouvelle` avec clé substitut `sk_nouvelle`
+2. Ajouter `sk_nouvelle` aux faits concernés (défaut `-1`)  
+3. Implémenter peuplement dimension
+4. Mise à jour faits avec vraies valeurs
+5. Tests intégrité référentielle
 
-**Volumétrie** : 94 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_specialite` | BIGSERIAL | PRIMARY KEY | **Clé substitut** |
-| `code_specialite` | VARCHAR(10) | UNIQUE NOT NULL | **Business Key** (code spécialité) |
-| `fonction` | VARCHAR(100) | - | Fonction : Médecin généraliste, Infirmier, etc. |
-| `specialite` | VARCHAR(100) | - | Spécialité détaillée : Cardiologie, Dermatologie, etc. |
-| `categorie` | VARCHAR(50) | - | **Classification** : Médecine générale, Soins infirmiers, etc. |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création |
-
-#### Catégories (30+)
-
-- Médecine générale
-- Médecine spécialisée
-- Soins infirmiers
-- Chirurgie
-- Pharmacie
-- Rééducation
-- Santé mentale
-- Imagerie médicale
-- Dentaire
-- Médecine alternative
-- ... (voir stg_specialites.sql pour la liste complète)
-
-#### Exemple
-
-```sql
-sk_specialite | code_specialite | fonction              | specialite   | categorie
---------------|-----------------|-----------------------|--------------|-------------------
--1            | INCONNU         | Inconnu               | NULL         | Autre
-1             | SM26            | Infirmier             | NULL         | Soins infirmiers
-2             | SM54            | Médecin spécialiste   | Cardiologie  | Medecine specialisee
-```
+#### Ajout Nouvelle Mesure
+1. Ajouter colonne fait avec valeur défaut
+2. Implémenter calcul mesure dans transformations
+3. Recalcul rétroactif si nécessaire
+4. Mise à jour datamarts impactés
 
 ---
 
-### 5. `dim_diagnostic` - Dimension Diagnostic CIM-10
-
-**Description** : Référentiel des diagnostics médicaux (Classification CIM-10)
-
-**Type SCD** : Type 1 (pas d'historisation)
-
-**Alimentation** : Mensuelle
-
-**Volumétrie** : ~15,491 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_diagnostic` | BIGSERIAL | PRIMARY KEY | **Clé substitut** |
-| `code_diagnostic` | VARCHAR(10) | UNIQUE NOT NULL | **Business Key** (code CIM-10) |
-| `libelle_diagnostic` | VARCHAR(255) | - | Description du diagnostic |
-| `categorie_cim10` | VARCHAR(5) | - | 3 premiers caractères du code (ex: J06) |
-| `chapitre_cim10` | VARCHAR(100) | - | Chapitre CIM-10 (21 chapitres) |
-| `source_donnee` | VARCHAR(50) | - | Source : PostgreSQL/Hospitalisation/Etablissement |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_diagnostic`
-- `UNIQUE` : `code_diagnostic`
-- `INDEX` : `code_diagnostic`, `categorie_cim10`
-
-#### Chapitres CIM-10 (21)
-
-1. Maladies infectieuses et parasitaires (A00-B99)
-2. Tumeurs (C00-D48)
-3. Maladies du sang (D50-D89)
-4. Maladies endocriniennes (E00-E90)
-5. Troubles mentaux (F00-F99)
-6. Maladies du système nerveux (G00-G99)
-7. Maladies de l'œil (H00-H59)
-8. Maladies de l'oreille (H60-H95)
-9. **Maladies de l'appareil circulatoire (I00-I99)**
-10. **Maladies de l'appareil respiratoire (J00-J99)**
-... (21 chapitres au total)
-
-#### Exemple
-
-```sql
-sk_diagnostic | code_diagnostic | libelle_diagnostic                    | categorie_cim10 | chapitre_cim10
---------------|-----------------|---------------------------------------|-----------------|----------------------------
--1            | INCONNU         | Diagnostic inconnu                    | INC             | Inconnu
-42            | J06.9           | Infection aiguë des voies respiratoires| J06             | Maladies appareil respiratoire
-125           | I10             | Hypertension essentielle (primaire)   | I10             | Maladies appareil circulatoire
-```
-
----
-
-### 6. `dim_etablissement` - Dimension Établissement de Santé
-
-**Description** : Établissements de santé référencés FINESS
-
-**Type SCD** : Type 1 (pas d'historisation)
-
-**Alimentation** : Mensuelle
-
-**Volumétrie** : ~416,000 lignes (mais seulement ~201 dans les faits actuels)
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_etablissement` | BIGSERIAL | PRIMARY KEY | **Clé substitut** |
-| `finess` | VARCHAR(20) | UNIQUE NOT NULL | **Business Key** (numéro FINESS) |
-| `nom_etablissement` | VARCHAR(255) | - | Raison sociale |
-| `type_etablissement` | VARCHAR(50) | - | **Classification auto** : CHU/Hôpital/Clinique/EHPAD/etc. |
-| `categorie` | VARCHAR(100) | - | Public/Privé/Médico-social/Non déterminé |
-| `region` | VARCHAR(100) | - | Région française (13 régions) |
-| `departement` | VARCHAR(3) | - | Département (01-95, 2A, 2B, 971-976) |
-| `adresse` | VARCHAR(255) | - | Adresse complète |
-| `code_postal` | VARCHAR(10) | - | Code postal |
-| `ville` | VARCHAR(100) | - | Commune |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_etablissement`
-- `UNIQUE` : `finess`
-- `INDEX` : `finess`, `region`
-
-#### Classification Automatique
-
-**Types détectés** (basé sur le nom) :
-- **CHU** : si nom contient "CHU" ou "UNIVERSITAIRE"
-- **Hôpital Public** : si "CH ", "HOPITAL", "HOSP"
-- **Clinique Privée** : si "CLINIQUE"
-- **EHPAD** : si "EHPAD"
-- **Centre de Santé** : si "CENTRE" + "SANTE"
-- **CIAS** : si "CIAS" ou "CCAS"
-- **Conseil Départemental** : si "CONSEIL" + "DEPARTEMENTAL"
-- **Autre établissement** : par défaut
-
-**Catégories** :
-- **Public** : CHU, CH, Hôpital, Conseil Départemental
-- **Privé** : Clinique, Cabinet
-- **Médico-social** : EHPAD, Maison retraite, CIAS
-
-#### Exemple
-
-```sql
-sk_etablissement | finess    | nom_etablissement                   | type_etablissement        | categorie     | region
------------------|-----------|-------------------------------------|---------------------------|---------------|---------------
--1               | INCONNU   | Etablissement inconnu               | Autre etablissement       | Non determine | Non renseigne
-1                | 180036014 | CHNO DES QUINZE-VINGTS PARIS       | Hopital Public            | Public        | Ile-de-France
-2                | 200009181 | CIAS AIME                           | Centre Communal Action... | Medico-social | Auvergne-Rhone-Alpes
-```
-
----
-
-### 7. `dim_localisation` - Dimension Localisation Géographique
-
-**Description** : Lieux consolidés (patients, établissements, décès)
-
-**Type SCD** : Type 1 (pas d'historisation)
-
-**Alimentation** : Mensuelle
-
-**Volumétrie** : ~50,000 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_localisation` | BIGSERIAL | PRIMARY KEY | **Clé substitut** |
-| `code_lieu` | VARCHAR(10) | NOT NULL | **Business Key** (code INSEE ou postal) |
-| `nom_lieu` | VARCHAR(100) | - | Nom du lieu |
-| `code_postal` | VARCHAR(10) | - | Code postal |
-| `ville` | VARCHAR(100) | - | Commune |
-| `departement` | VARCHAR(3) | - | Département (01-95, 2A, 2B) |
-| `region` | VARCHAR(100) | - | Région (13 régions + Outre-mer) |
-| `pays` | VARCHAR(2) | - | Code pays (FR par défaut) |
-| `type_lieu` | VARCHAR(50) | - | Patient/Hospitalisation/Deces/Etablissement |
-| `latitude` | DECIMAL(10,8) | - | Coordonnées GPS (si disponible) |
-| `longitude` | DECIMAL(11,8) | - | Coordonnées GPS (si disponible) |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création |
-
-#### Contrainte
-
-- `UNIQUE(code_lieu, type_lieu)` : Même code peut exister pour différents types
-
-#### Index
-
-- `PRIMARY KEY` : `sk_localisation`
-- `UNIQUE` : `code_lieu + type_lieu`
-- `INDEX` : `code_lieu`, `region`, `type_lieu`
-
-#### Régions (13 + Outre-mer + Corse)
-
-- Île-de-France
-- Provence-Alpes-Côte d'Azur
-- Auvergne-Rhône-Alpes
-- Nouvelle-Aquitaine
-- Occitanie
-- Hauts-de-France
-- Normandie
-- Grand Est
-- Bourgogne-Franche-Comté
-- Pays de la Loire
-- Bretagne
-- Centre-Val de Loire
-- **Corse** (2A Corse-du-Sud, 2B Haute-Corse)
-- **Outre-mer** (971-976)
-
-#### Exemple
-
-```sql
-sk_localisation | code_lieu | nom_lieu | code_postal | ville | departement | region      | type_lieu
-----------------|-----------|----------|-------------|-------|-------------|-------------|----------
--1              | INCONNU   | Inconnu  | NULL        | NULL  | NULL        | Non renseigne| Inconnu
-1               | 75001     | Paris 1er| 75001       | Paris | 75          | Ile-de-France| Patient
-2               | 20000     | Ajaccio  | 20000       | Ajaccio| 2A         | Corse       | Deces
-```
-
----
-
-### 8. `dim_mutuelle` - Dimension Mutuelle/Assurance
-
-**Description** : Organismes de protection sociale
-
-**Type SCD** : Type 1 (pas d'historisation)
-
-**Alimentation** : Mensuelle
-
-**Volumétrie** : 255 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_mutuelle` | BIGSERIAL | PRIMARY KEY | **Clé substitut** |
-| `id_mut` | INT | UNIQUE NOT NULL | **Business Key** (ID mutuelle source) |
-| `nom_mutuelle` | VARCHAR(255) | - | Nom de la mutuelle |
-| `adresse` | VARCHAR(255) | - | Adresse siège social |
-| `type_mutuelle` | VARCHAR(50) | - | **Classification** : CMU/Assurance/Mutuelle/Autre |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de création |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_mutuelle`
-- `UNIQUE` : `id_mut`
-- `INDEX` : `id_mut`
-
-#### Classification Automatique
-
-Basée sur le nom :
-- **CMU** : si nom contient "CMU"
-- **Assurance** : si "ASSURANCE"
-- **Mutuelle** : si "MUTUELLE"
-- **Autre** : par défaut
-
-#### Exemple
-
-```sql
-sk_mutuelle | id_mut | nom_mutuelle         | type_mutuelle | adresse
-------------|--------|----------------------|---------------|--------
--1          | -1     | Aucune mutuelle      | Autre         | NULL
-1           | 12     | CMU-C Complémentaire | CMU           | Paris
-2           | 45     | Mutuelle AXA Santé   | Mutuelle      | Lyon
-3           | 78     | Assurance Maladie    | Assurance     | Marseille
-```
-
----
-
-## ⭐ FAITS (Tables de Mesures)
-
-### 1. `fait_consultation` - Fait Consultation Médicale
-
-**Description** : Consultations médicales au CHU
-
-**Grain** : **1 ligne = 1 consultation**
-
-**Alimentation** : Quotidienne (incrémental)
-
-**Volumétrie** : ~1,027,000 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_fait_consultation` | BIGSERIAL | PRIMARY KEY | Clé technique |
-| **Clés Étrangères (FK)** ||||
-| `sk_patient` | BIGINT | NOT NULL, FK → dim_patient | Patient ayant consulté |
-| `sk_professionnel` | BIGINT | NOT NULL, FK → dim_professionnel | Professionnel consulté |
-| `sk_diagnostic` | BIGINT | NOT NULL, FK → dim_diagnostic | Diagnostic posé |
-| `sk_mutuelle` | BIGINT | FK → dim_mutuelle | Mutuelle du patient |
-| `sk_temps` | BIGINT | NOT NULL, FK → dim_temps | Date de la consultation |
-| **Dimensions Dégénérées** ||||
-| `num_consultation` | INT | - | Numéro consultation (business key) |
-| `heure_debut` | TIME | - | Heure début consultation |
-| `heure_fin` | TIME | - | Heure fin consultation |
-| `motif` | VARCHAR(255) | - | Motif de consultation |
-| **Mesures (Métriques)** ||||
-| `duree_consultation` | INT | - | **MESURE** : Durée en minutes |
-| `nombre_consultations` | INT | DEFAULT 1 | **MESURE** : Compteur (= 1) |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de chargement |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_fait_consultation`
-- `INDEX` : `sk_patient`, `sk_professionnel`, `sk_diagnostic`, `sk_temps`
-
-#### Business Rules
-
-- ✅ FK NULL → -1 (Inconnu)
-- ✅ `nombre_consultations = 1` (compteur pour SUM)
-- ✅ Mesures **additives** (SUM possible)
-
-#### Requêtes Analytiques
-
-```sql
--- Top 10 spécialités par nombre de consultations
-SELECT 
-    s.categorie,
-    SUM(fc.nombre_consultations) AS nb_consultations,
-    AVG(fc.duree_consultation) AS duree_moyenne_min
-FROM fait_consultation fc
-JOIN dim_professionnel p ON fc.sk_professionnel = p.sk_professionnel AND p.est_actuel = TRUE
-JOIN dim_specialite s ON p.fk_specialite = s.sk_specialite
-GROUP BY s.categorie
-ORDER BY nb_consultations DESC
-LIMIT 10;
-```
-
----
-
-### 2. `fait_hospitalisation` - Fait Hospitalisation
-
-**Description** : Séjours hospitaliers au CHU
-
-**Grain** : **1 ligne = 1 hospitalisation**
-
-**Alimentation** : Mensuelle
-
-**Volumétrie** : ~2,500 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_fait_hospitalisation` | BIGSERIAL | PRIMARY KEY | Clé technique |
-| **Clés Étrangères (FK)** ||||
-| `sk_patient` | BIGINT | NOT NULL, FK → dim_patient | Patient hospitalisé |
-| `sk_etablissement` | BIGINT | NOT NULL, FK → dim_etablissement | Établissement d'hospitalisation |
-| `sk_diagnostic` | BIGINT | NOT NULL, FK → dim_diagnostic | Diagnostic principal |
-| `sk_temps` | BIGINT | NOT NULL, FK → dim_temps | Date d'admission |
-| `sk_localisation` | BIGINT | NOT NULL, FK → dim_localisation | Lieu de l'établissement |
-| **Dimensions Dégénérées** ||||
-| `num_hospitalisation` | INT | - | Numéro hospitalisation (business key) |
-| **Mesures (Métriques)** ||||
-| `jour_hospitalisation` | INT | - | **MESURE** : Durée séjour en jours (DMS) |
-| `nombre_hospitalisations` | INT | DEFAULT 1 | **MESURE** : Compteur (= 1) |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de chargement |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_fait_hospitalisation`
-- `INDEX` : `sk_patient`, `sk_etablissement`, `sk_diagnostic`, `sk_temps`, `sk_localisation`
-
-#### Indicateurs Métier
-
-- **DMS** (Durée Moyenne Séjour) : `AVG(jour_hospitalisation)`
-- **Taux occupation** : Si données disponibles
-- **Court séjour** : < 3 jours
-- **Moyen séjour** : 3-7 jours
-- **Long séjour** : > 7 jours
-
-#### Requêtes Analytiques
-
-```sql
--- DMS par région
-SELECT 
-    l.region,
-    AVG(fh.jour_hospitalisation) AS dms,
-    COUNT(*) AS nb_sejours
-FROM fait_hospitalisation fh
-JOIN dim_localisation l ON fh.sk_localisation = l.sk_localisation
-GROUP BY l.region
-ORDER BY dms DESC;
-```
-
----
-
-### 3. `fait_deces` - Fait Décès
-
-**Description** : Décès en France (INSEE)
-
-**Grain** : **1 ligne = 1 décès**
-
-**Alimentation** : Annuelle
-
-**Volumétrie** : ~25,088,000 lignes ⚠️ **GROS VOLUME**
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_fait_deces` | BIGSERIAL | PRIMARY KEY | Clé technique |
-| **Clés Étrangères (FK)** ||||
-| `sk_patient` | BIGINT | FK → dim_patient | Patient décédé (peut être NULL si non matché) |
-| `sk_localisation` | BIGINT | NOT NULL, FK → dim_localisation | Lieu du décès |
-| `sk_temps` | BIGINT | NOT NULL, FK → dim_temps | Date du décès |
-| **Dimensions Dégénérées** ||||
-| `code_lieu_deces` | VARCHAR(10) | - | Code INSEE lieu décès |
-| `numero_acte_deces` | VARCHAR(20) | - | Numéro acte de décès |
-| **Mesures (Métriques)** ||||
-| `age_deces` | INT | - | **MESURE** : Âge au moment du décès |
-| `nombre_deces` | INT | DEFAULT 1 | **MESURE** : Compteur (= 1) |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de chargement |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_fait_deces`
-- `INDEX` : `sk_patient`, `sk_localisation`, `sk_temps`
-
-#### Business Rules
-
-- ⚠️ `sk_patient` **peut être NULL** (décès non matché avec patients CHU)
-- ✅ Tous les décès INSEE présents (même hors CHU)
-- ✅ Matching fuzzy sur nom/prénom/date_naissance
-
-#### Requêtes Analytiques
-
-```sql
--- Mortalité par région et tranche d'âge
-SELECT 
-    l.region,
-    p.tranche_age,
-    COUNT(*) AS nb_deces,
-    AVG(fd.age_deces) AS age_moyen
-FROM fait_deces fd
-JOIN dim_localisation l ON fd.sk_localisation = l.sk_localisation
-LEFT JOIN dim_patient p ON fd.sk_patient = p.sk_patient
-GROUP BY l.region, p.tranche_age
-ORDER BY l.region, p.tranche_age;
-```
-
----
-
-### 4. `fait_satisfaction` - Fait Satisfaction e-Satis
-
-**Description** : Enquêtes de satisfaction patients (e-Satis 48h MCO)
-
-**Grain** : **1 ligne = 1 établissement × 1 année**
-
-**Alimentation** : Annuelle
-
-**Volumétrie** : ~5,000 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_fait_satisfaction` | BIGSERIAL | PRIMARY KEY | Clé technique |
-| **Clés Étrangères (FK)** ||||
-| `sk_etablissement` | BIGINT | NOT NULL, FK → dim_etablissement | Établissement évalué |
-| `sk_temps` | BIGINT | NOT NULL, FK → dim_temps | Année de l'enquête |
-| `sk_localisation` | BIGINT | NOT NULL, FK → dim_localisation | Localisation établissement |
-| **Mesures (Scores de Satisfaction)** ||||
-| `score_global` | DECIMAL(5,2) | - | **MESURE** : Score global (/100) |
-| `score_accueil` | DECIMAL(5,2) | - | **MESURE** : Score accueil (/100) |
-| `score_pec_infirmiers` | DECIMAL(5,2) | - | **MESURE** : Score prise en charge infirmiers |
-| `score_pec_medecins` | DECIMAL(5,2) | - | **MESURE** : Score prise en charge médecins |
-| `score_chambre` | DECIMAL(5,2) | - | **MESURE** : Score chambre |
-| `score_repas` | DECIMAL(5,2) | - | **MESURE** : Score repas |
-| `score_sortie` | DECIMAL(5,2) | - | **MESURE** : Score organisation sortie |
-| `taux_recommandation` | DECIMAL(5,2) | - | **MESURE** : % patients qui recommanderaient |
-| `nombre_reponses` | INT | - | **MESURE** : Nombre de réponses exploitables |
-| **Dimensions Dégénérées** ||||
-| `classement` | VARCHAR(2) | - | A/B/C/D/DI (classes de satisfaction) |
-| `evolution` | VARCHAR(10) | - | Évolution vs année précédente |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de chargement |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_fait_satisfaction`
-- `INDEX` : `sk_etablissement`, `sk_temps`, `sk_localisation`
-
-#### Requêtes Analytiques
-
-```sql
--- Évolution satisfaction par région
-SELECT 
-    l.region,
-    t.annee,
-    AVG(fs.score_global) AS score_moyen,
-    AVG(fs.taux_recommandation) AS taux_reco_moyen,
-    COUNT(DISTINCT fs.sk_etablissement) AS nb_etablissements
-FROM fait_satisfaction fs
-JOIN dim_localisation l ON fs.sk_localisation = l.sk_localisation
-JOIN dim_temps t ON fs.sk_temps = t.sk_temps
-GROUP BY l.region, t.annee
-ORDER BY l.region, t.annee;
-```
-
----
-
-### 5. `fait_qualite_soins` - Fait Qualité des Soins (IPAQSS)
-
-**Description** : Indicateurs qualité et sécurité des soins
-
-**Grain** : **1 ligne = 1 établissement × 1 année × 1 indicateur**
-
-**Alimentation** : Annuelle
-
-**Volumétrie** : ~3,000 lignes
-
-#### Structure
-
-| Colonne | Type | Contrainte | Description |
-|---------|------|------------|-------------|
-| `sk_fait_qualite` | BIGSERIAL | PRIMARY KEY | Clé technique |
-| **Clés Étrangères (FK)** ||||
-| `sk_etablissement` | BIGINT | NOT NULL, FK → dim_etablissement | Établissement évalué |
-| `sk_temps` | BIGINT | NOT NULL, FK → dim_temps | Année de l'indicateur |
-| `sk_localisation` | BIGINT | NOT NULL, FK → dim_localisation | Localisation établissement |
-| **Mesures (Indicateurs IPAQSS)** ||||
-| `ratio_ete_ortho` | DECIMAL(10,6) | - | **MESURE** : Ratio événements thrombo-emboliques (orthopédie) |
-| `alerte_ete` | INT | - | **MESURE** : 0=Normal, 1=Alerte |
-| `ratio_iso_ortho` | DECIMAL(10,6) | - | **MESURE** : Ratio infections site opératoire (orthopédie) |
-| `alerte_iso` | INT | - | **MESURE** : 0=Normal, 1=Alerte |
-| **Dimensions Dégénérées** ||||
-| `evolution_ete` | VARCHAR(10) | - | Évolution indicateur ETE |
-| `date_chargement` | TIMESTAMP | DEFAULT NOW() | Date de chargement |
-
-#### Index
-
-- `PRIMARY KEY` : `sk_fait_qualite`
-- `INDEX` : `sk_etablissement`, `sk_temps`, `sk_localisation`
-
-#### Indicateurs IPAQSS
-
-- **ETE** : Événements Thrombo-Emboliques
-- **ISO** : Infections Site Opératoire
-- **Alertes** : Si ratio > seuil critique
-
-#### Requêtes Analytiques
-
-```sql
--- Établissements en alerte qualité
-SELECT 
-    e.nom_etablissement,
-    e.region,
-    t.annee,
-    fq.ratio_ete_ortho,
-    fq.alerte_ete,
-    fq.ratio_iso_ortho,
-    fq.alerte_iso
-FROM fait_qualite_soins fq
-JOIN dim_etablissement e ON fq.sk_etablissement = e.sk_etablissement
-JOIN dim_temps t ON fq.sk_temps = t.sk_temps
-WHERE fq.alerte_ete = 1 OR fq.alerte_iso = 1
-ORDER BY t.annee DESC, e.region;
-```
-
----
-
-## 📊 VUES ANALYTIQUES
-
-### 1. `v_analyse_consultations`
-
-**Description** : Vue agrégée des consultations par profil patient et spécialité
-
-**Grain** : Sexe × Tranche_age × Profession × Diagnostic × Année × Mois
-
-```sql
-CREATE VIEW v_analyse_consultations AS
-SELECT 
-    p.sexe,
-    p.tranche_age,
-    prof.profession,
-    d.categorie_cim10,
-    t.annee,
-    t.mois,
-    COUNT(fc.nombre_consultations) AS nb_consultations,
-    AVG(fc.duree_consultation) AS duree_moyenne_min
-FROM fait_consultation fc
-JOIN dim_patient p ON fc.sk_patient = p.sk_patient
-JOIN dim_professionnel prof ON fc.sk_professionnel = prof.sk_professionnel
-JOIN dim_diagnostic d ON fc.sk_diagnostic = d.sk_diagnostic
-JOIN dim_temps t ON fc.sk_temps = t.sk_temps
-GROUP BY p.sexe, p.tranche_age, prof.profession, d.categorie_cim10, t.annee, t.mois;
-```
-
----
-
-### 2. `v_analyse_hospitalisations`
-
-**Description** : Vue agrégée des hospitalisations par profil et région
-
-**Grain** : Sexe × Tranche_age × Type_etablissement × Région × Diagnostic × Année
-
-```sql
-CREATE VIEW v_analyse_hospitalisations AS
-SELECT 
-    p.sexe,
-    p.tranche_age,
-    e.type_etablissement,
-    e.region,
-    d.categorie_cim10,
-    t.annee,
-    COUNT(fh.nombre_hospitalisations) AS nb_hospitalisations,
-    AVG(fh.jour_hospitalisation) AS duree_moyenne_sejour
-FROM fait_hospitalisation fh
-JOIN dim_patient p ON fh.sk_patient = p.sk_patient
-JOIN dim_etablissement e ON fh.sk_etablissement = e.sk_etablissement
-JOIN dim_diagnostic d ON fh.sk_diagnostic = d.sk_diagnostic
-JOIN dim_temps t ON fh.sk_temps = t.sk_temps
-GROUP BY p.sexe, p.tranche_age, e.type_etablissement, e.region, d.categorie_cim10, t.annee;
-```
-
----
-
-### 3. `v_analyse_deces`
-
-**Description** : Vue agrégée des décès par région et période
-
-**Grain** : Région × Année × Mois
-
-```sql
-CREATE VIEW v_analyse_deces AS
-SELECT 
-    l.region,
-    t.annee,
-    t.mois,
-    COUNT(fd.nombre_deces) AS nb_deces,
-    AVG(fd.age_deces) AS age_moyen_deces
-FROM fait_deces fd
-JOIN dim_localisation l ON fd.sk_localisation = l.sk_localisation
-JOIN dim_temps t ON fd.sk_temps = t.sk_temps
-GROUP BY l.region, t.annee, t.mois;
-```
-
----
-
-### 4. `v_analyse_satisfaction`
-
-**Description** : Vue agrégée de la satisfaction par région et type d'établissement
-
-**Grain** : Région × Type_etablissement × Année
-
-```sql
-CREATE VIEW v_analyse_satisfaction AS
-SELECT 
-    l.region,
-    e.type_etablissement,
-    t.annee,
-    AVG(fs.score_global) AS score_moyen_global,
-    AVG(fs.taux_recommandation) AS taux_reco_moyen,
-    COUNT(DISTINCT e.sk_etablissement) AS nb_etablissements
-FROM fait_satisfaction fs
-JOIN dim_etablissement e ON fs.sk_etablissement = e.sk_etablissement
-JOIN dim_localisation l ON fs.sk_localisation = l.sk_localisation
-JOIN dim_temps t ON fs.sk_temps = t.sk_temps
-GROUP BY l.region, e.type_etablissement, t.annee;
-```
-
----
-
-## 🔗 Diagramme de Relations
-
-```
-                    dim_temps
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-    dim_patient    dim_diagnostic  dim_mutuelle
-        │               │               │
-        └───────────┬───┴───┬───────────┘
-                    │       │
-              fait_consultation
-                    │
-        ┌───────────┴───────────┐
-        │                       │
-    dim_professionnel      dim_specialite
-        │
-        └─────────── fk_specialite
-
-
-                    dim_temps
-                        │
-        ┌───────────────┼───────────────────┐
-        │               │                   │
-    dim_patient    dim_diagnostic   dim_etablissement
-        │               │                   │
-        │               │           dim_localisation
-        └───────────┬───┴───────────┬───────┘
-                    │               │
-              fait_hospitalisation
-              
-              
-                    dim_temps
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-    dim_patient  dim_localisation     │
-        │               │               │
-        └───────────────┴───────────────┘
-                        │
-                   fait_deces
-                   
-
-                    dim_temps
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-dim_etablissement  dim_localisation    │
-        └───────────────┴───────────────┘
-                        │
-                 fait_satisfaction
-                 
-
-                    dim_temps
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-dim_etablissement  dim_localisation    │
-        └───────────────┴───────────────┘
-                        │
-               fait_qualite_soins
-```
-
----
-
-## 📈 Volumétrie Détaillée
-
-### Dimensions
-
-| Table | Lignes | Taille Estimée | Croissance |
-|-------|--------|----------------|------------|
-| `dim_patient` | 100,001 | ~15 MB | +5K/mois |
-| `dim_professionnel` | 1,048,575 | ~120 MB | +10K/mois |
-| `dim_specialite` | 94 | ~10 KB | Stable |
-| `dim_diagnostic` | 15,491 | ~2 MB | Stable |
-| `dim_etablissement` | 201 | ~50 KB | Stable |
-| `dim_localisation` | 39,724 | ~5 MB | +1K/mois |
-| `dim_temps` | 5,845 | ~500 KB | Stable (2015-2030) |
-| `dim_mutuelle` | 255 | ~20 KB | +5/mois |
-| **TOTAL DIMS** | **~1.2M** | **~142 MB** | - |
-
-### Faits
-
-| Table | Lignes | Taille Estimée | Croissance |
-|-------|--------|----------------|------------|
-| `fait_consultation` | 2,030,131 | ~250 MB | +50K/jour |
-| `fait_hospitalisation` | 4,919 | ~1 MB | +500/mois |
-| `fait_deces` | 25,088,000 | ~2.5 GB | +500K/an |
-| `fait_satisfaction` | ~5,000 | ~500 KB | +500/an |
-| `fait_qualite_soins` | ~3,000 | ~300 KB | +300/an |
-| **TOTAL FAITS** | **~27M** | **~2.75 GB** | - |
-
-### TOTAL DWH
-
-**Volumétrie totale** : ~28M lignes, ~3 GB
-
----
-
-## 🔑 Conventions de Nommage
-
-### Clés
-
-| Préfixe | Type | Exemple | Description |
-|---------|------|---------|-------------|
-| `sk_*` | Clé substitut | `sk_patient` | Clé technique auto-générée (PRIMARY KEY) |
-| `fk_*` | Clé étrangère | `fk_specialite` | Référence vers autre dimension |
-| `id_*` | Business key | `id_patient` | Clé métier source (UNIQUE) |
-| `code_*` | Code métier | `code_diagnostic` | Code normalisé (CIM-10, FINESS, etc.) |
-
-### Tables
-
-| Préfixe | Type | Exemple |
-|---------|------|---------|
-| `dim_*` | Dimension | `dim_patient` |
-| `fait_*` | Fait | `fait_consultation` |
-| `v_*` | Vue | `v_analyse_consultations` |
-
----
-
-## 📋 Checklist Conformité DWH
-
-### ✅ Dimensions
-
-- [ ] Toutes ont une clé substitut `sk_*`
-- [ ] Toutes ont une business key UNIQUE
-- [ ] Toutes ont une ligne "Inconnu" (sk = -1)
-- [ ] Types de données corrects
-- [ ] Index sur business key
-- [ ] Commentaires présents
-
-### ✅ Faits
-
-- [ ] Toutes ont des FK vers dimensions
-- [ ] Grain clairement défini
-- [ ] Mesures additives (SUM possible)
-- [ ] Pas d'informations qui changent (utiliser FK)
-- [ ] Index sur toutes les FK
-- [ ] Commentaires sur mesures
-
----
-
-## 📚 Utilisation
-
-### Requêtes d'Analyse Types
-
-```sql
--- 1. Consultations par spécialité et période
-SELECT 
-    s.categorie,
-    t.annee,
-    t.trimestre,
-    COUNT(*) AS nb_consultations,
-    AVG(fc.duree_consultation) AS duree_moyenne
-FROM fait_consultation fc
-JOIN dim_professionnel p ON fc.sk_professionnel = p.sk_professionnel AND p.est_actuel = TRUE
-JOIN dim_specialite s ON p.fk_specialite = s.sk_specialite
-JOIN dim_temps t ON fc.sk_temps = t.sk_temps
-GROUP BY s.categorie, t.annee, t.trimestre;
-
--- 2. DMS (Durée Moyenne Séjour) par établissement
-SELECT 
-    e.nom_etablissement,
-    e.type_etablissement,
-    e.region,
-    AVG(fh.jour_hospitalisation) AS dms,
-    COUNT(*) AS nb_sejours
-FROM fait_hospitalisation fh
-JOIN dim_etablissement e ON fh.sk_etablissement = e.sk_etablissement
-GROUP BY e.nom_etablissement, e.type_etablissement, e.region
-HAVING COUNT(*) > 10  -- Minimum 10 séjours
-ORDER BY dms DESC;
-
--- 3. Mortalité par région et âge
-SELECT 
-    l.region,
-    CASE 
-        WHEN fd.age_deces < 18 THEN '0-18'
-        WHEN fd.age_deces BETWEEN 19 AND 65 THEN '19-65'
-        ELSE '66+'
-    END AS tranche_age_deces,
-    COUNT(*) AS nb_deces,
-    AVG(fd.age_deces) AS age_moyen
-FROM fait_deces fd
-JOIN dim_localisation l ON fd.sk_localisation = l.sk_localisation
-GROUP BY l.region, tranche_age_deces
-ORDER BY l.region, tranche_age_deces;
-
--- 4. Top 10 établissements satisfaction
-SELECT 
-    e.nom_etablissement,
-    e.region,
-    AVG(fs.score_global) AS score_moyen,
-    AVG(fs.taux_recommandation) AS taux_reco
-FROM fait_satisfaction fs
-JOIN dim_etablissement e ON fs.sk_etablissement = e.sk_etablissement
-GROUP BY e.nom_etablissement, e.region
-ORDER BY score_moyen DESC
-LIMIT 10;
-```
-
----
-
-## 🔒 Sécurité et RGPD
-
-### Données Anonymisées
-
-| Table | Colonnes Sensibles | Méthode |
-|-------|-------------------|---------|
-| `dim_patient` | `nom`, `prenom`, `num_secu` | SHA-256 (hash irréversible) |
-| `dim_professionnel` | `nom`, `prenom` | SHA-256 (hash irréversible) |
-
-### Hachage SHA-256
-
-```sql
--- Exemple
-Nom original : "DUPONT"
-Hash SHA-256 : "a3f2d1c8f4e6b9a7..." (64 caractères)
-Tronqué (8 car) : "a3f2d1c8"
-
--- Propriétés
-✅ Irréversible (impossible de retrouver le nom)
-✅ Déterministe (même nom = même hash)
-✅ Collision quasi-impossible
-✅ Conforme RGPD (pseudonymisation)
-```
-
----
-
-## 📚 Glossaire
-
-| Terme | Définition |
-|-------|------------|
-| **Clé substitut (sk_*)** | Clé technique auto-générée, sans signification métier, utilisée comme PRIMARY KEY |
-| **Business key** | Clé métier source (ID original), UNIQUE mais pas PRIMARY KEY |
-| **SCD Type 1** | Slowly Changing Dimension Type 1 : mise à jour directe (écrase les anciennes valeurs) |
-| **SCD Type 2** | Slowly Changing Dimension Type 2 : historisation complète (nouvelle ligne pour chaque changement) |
-| **Grain** | Niveau de détail d'un fait (ex: 1 ligne = 1 consultation) |
-| **Mesure** | Métrique numérique additive (COUNT, SUM, AVG possible) |
-| **Dimension dégénérée** | Attribut descriptif stocké dans le fait (pas dans une dimension séparée) |
-| **FK** | Foreign Key (clé étrangère vers une dimension) |
-| **DMS** | Durée Moyenne de Séjour (indicateur hospitalier) |
-| **CIM-10** | Classification Internationale des Maladies (10e révision) |
-| **FINESS** | Fichier National des Établissements Sanitaires et Sociaux |
-| **RPPS** | Répertoire Partagé des Professionnels de Santé |
-| **ADELI** | Automatisation Des Listes (identifiant professionnel) |
-| **IPAQSS** | Indicateurs Pour l'Amélioration de la Qualité et de la Sécurité des Soins |
-
----
-
-**Auteur** : Équipe Big Data Groupe 3  
-**Version** : 1.0  
-**Date** : 2025-10-21  
-**Basé sur** : `db.sql` (schéma cible PostgreSQL)
-
+**🔗 Liens Connexes** :  
+📋 [Index Documentation](INDEX_TRANSFORMATIONS.md) | ⚡ [Transformations DWH](TRANSFORMATIONS_ODS_TO_DWH.md) | 📊 [Transformations DATAMART](TRANSFORMATIONS_DWH_TO_DATAMART.md)
+
+**📅 Dernière mise à jour** : 7 décembre 2024  
+**📧 Contact** : Équipe Big Data Groupe 3

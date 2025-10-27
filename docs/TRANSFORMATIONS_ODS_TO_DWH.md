@@ -1,713 +1,783 @@
-# 🔄 Transformations ODS → DWH
+# ⭐ Transformations ODS → DWH
 
-## 📋 Vue d'Ensemble
+## 🎯 Vue d'Ensemble
 
-La couche **DWH** (Data Warehouse) transforme les données intégrées (ODS) en **modèle dimensionnel** pour l'analyse.
+La couche **DWH (Data Warehouse)** constitue l'étape finale de la modélisation des données, transformant les données intégrées d'ODS en un **modèle dimensionnel en étoile** optimisé pour l'analyse. Cette étape implémente le **schéma en constellation** avec clés substituts, relations référentielles et anonymisation RGPD.
 
-### Principe Fondamental
+### 📊 Architecture DWH - Modèle en Constellation
 
-> **ODS = Données intégrées** (structure opérationnelle)
-> 
-> **DWH = Modèle dimensionnel** (architecture en étoile)
-> 
-> ✅ **Clés substituts** (sk_*) générées  
-> ✅ **Dimensions** créées  
-> ✅ **Faits** avec métriques  
-> ✅ **SCD Type 2** pour historisation
-
----
-
-## 🎯 Types de Transformations Appliquées
-
-### ✅ CE QU'ON FAIT (DWH)
-
-| Type | Description | Exemple |
-|------|-------------|---------|
-| **Clés substituts** | Génération sk_* séquentielles | sk_patient, sk_temps |
-| **Dimensions** | Tables de référence | dim_patient, dim_temps |
-| **Faits** | Tables de mesures | fait_consultation, fait_deces |
-| **SCD Type 2** | Historisation des changements | dim_professionnel avec validité |
-| **Dénormalisation** | Répéter infos pour performance | Nom patient dans fait |
-| **Ligne "Inconnu"** | sk=-1 pour valeurs manquantes | Patient inconnu, diagnostic inconnu |
-| **Agrégations simples** | COUNT, SUM dans faits | nombre_consultations |
-
-### ❌ CE QU'ON NE FAIT PAS ENCORE
-
-| Type | Raison | Où le faire ? |
-|------|--------|---------------|
-| **Agrégations complexes** | Pré-calculs pour BI | → **DATAMART** |
-| **Jointures multiples** | Déjà fait dans ODS | → **ODS** |
-| **Nettoyage données** | Déjà fait | → **STAGING** |
-
----
-
-## 📊 Architecture Star Schema
-
-```
-         dim_temps
-             |
-             |
-         dim_patient ────┐
-                         |
-                         ↓
-    dim_diagnostic ─→ fait_consultation ←─ dim_professionnel
-                         ↑
-                         |
-                    dim_mutuelle
-                    
+```mermaid
+graph TB
+    subgraph "🕐 Dimension Temporelle"
+        DT[dim_temps<br/>5,845 jours]
+    end
     
-Chaque FAIT a :
-- Des FK vers dimensions (sk_*)
-- Des métriques (COUNT, SUM, AVG)
-- Grain défini (1 ligne = quoi ?)
+    subgraph "👥 Dimensions Personnes"
+        DP[dim_patient<br/>100K RGPD]
+        DPR[dim_professionnel<br/>1M+ SCD Type 2]
+    end
+    
+    subgraph "🏥 Dimensions Organisationnelles"
+        DE[dim_etablissement<br/>416K FINESS]
+        DS[dim_specialite<br/>94 spécialités]
+        DM[dim_mutuelle<br/>255 organismes]
+    end
+    
+    subgraph "📋 Dimensions Médicales"
+        DD[dim_diagnostic<br/>15K CIM-10]
+        DL[dim_localisation<br/>Géo France]
+    end
+    
+    subgraph "⚡ Tables de Fait"
+        FC[fait_consultation<br/>1M+ actes]
+        FH[fait_hospitalisation<br/>2.5K séjours]
+        FD[fait_deces<br/>25M+ décès]
+        FS[fait_satisfaction<br/>5K+ enquêtes]
+        FQ[fait_qualite_soins<br/>3K+ indicateurs]
+    end
+    
+    DT --> FC
+    DT --> FH
+    DT --> FD
+    DT --> FS
+    DT --> FQ
+    
+    DP --> FC
+    DP --> FH
+    DP --> FD
+    
+    DPR --> FC
+    DS --> DPR
+    
+    DE --> FH
+    DE --> FS
+    DE --> FQ
+    
+    DD --> FC
+    DD --> FH
+    
+    DM --> FC
+    
+    DL --> FD
+    DL --> FS
+    
+    style DT fill:#fff3e0
+    style FC fill:#e3f2fd
+    style FH fill:#e3f2fd
+    style FD fill:#e3f2fd
+    style FS fill:#e3f2fd
+    style FQ fill:#e3f2fd
 ```
 
----
+## 📋 Tables DWH (13 tables)
 
-## 📊 Exemples Concrets par Dimension
+### 🔗 Dimensions (8 tables)
 
-### 1️⃣ `dim_patient` ⭐ (Dimension Simple)
+| **Dimension** | **Source ODS** | **Volume** | **Clé Substitut** | **Caractéristiques** |
+|--------------|----------------|------------|-------------------|---------------------|
+| `dim_temps` | Générée | 5,845 jours | `sk_temps` | 2015-2030, calendrier français |
+| `dim_patient` | `ods_patient_complet` | 100K lignes | `sk_patient` | Anonymisation SHA-256 |
+| `dim_professionnel` | `ods_professionnel_complet` | 1M+ lignes | `sk_professionnel` | SCD Type 2, historique |
+| `dim_etablissement` | `ods_localisation_consolidee` | 416K lignes | `sk_etablissement` | FINESS, géolocalisation |
+| `dim_specialite` | `stg_specialites` | 94 lignes | `sk_specialite` | Classifications médicales |
+| `dim_diagnostic` | `stg_diagnostic` | 15K lignes | `sk_diagnostic` | CIM-10, chapitres |
+| `dim_mutuelle` | `stg_mutuelle` | 255 lignes | `sk_mutuelle` | Organismes assurance |
+| `dim_localisation` | `ods_localisation_consolidee` | Variables | `sk_localisation` | Géographie France |
 
-**Source** : `ods_patient_complet`
+### ⚡ Faits (5 tables)
 
-#### Transformations Appliquées
+| **Fait** | **Sources ODS** | **Volume** | **Grain** | **Mesures** |
+|----------|-----------------|------------|-----------|-------------|
+| `fait_consultation` | `ods_consultation_enrichie` | 1M+ lignes | 1 consultation | Durée, nombre |
+| `fait_hospitalisation` | `ods_hospitalisation_enrichie` | 2.5K lignes | 1 séjour | Durée, nombre jours |
+| `fait_deces` | `ods_deces_enrichi` | 25M+ lignes | 1 décès | Nombre décès |
+| `fait_satisfaction` | `ods_satisfaction_unifie` | 5K+ lignes | 1 établissement/année | Scores satisfaction |
+| `fait_qualite_soins` | `ods_qualite_soins_unifie` | 3K+ lignes | 1 établissement/année | Indicateurs IPAQSS |
 
+## 🔧 Modélisation Dimensionnelle
+
+### 1. 🕐 Dimension Temporelle
+
+#### 📅 Référentiel Complet 2015-2030
 ```sql
-WITH patients_source AS (
-    SELECT * FROM {{ ref('ods_patient_complet') }}
+-- dim_temps: Dimension temporelle de référence
+with date_spine as (
+    select date_add('day', seq, '2015-01-01'::date) as date_complete
+    from generate_series(0, 5844) as seq  -- 2015-2030 = 5,845 jours
 ),
 
--- ✅ DÉDOUBLONNAGE : Un patient peut avoir plusieurs mutuelles
-patients_dedupliques AS (
-    SELECT
-        id_patient,
-        nom,
-        prenom,
-        sexe,
-        date_naissance,
-        age,
-        tranche_age,
-        groupe_sanguin,
-        poids,
-        taille,
-        code_postal,
-        ville,
-        pays,
-        num_secu,
-        loaded_at,
+enrichissement_temporel as (
+    select
+        -- Clé substitut séquentielle
+        row_number() over (order by date_complete) as sk_temps,
         
-        -- Garder seulement la première adhésion mutuelle
-        MAX(CASE WHEN a_mutuelle_active THEN 1 ELSE 0 END) AS a_mutuelle_active
+        -- Clé naturelle (business key)
+        cast(replace(date_complete::varchar, '-', '') as integer) as date_id,
         
-    FROM patients_source
-    GROUP BY id_patient, nom, prenom, sexe, date_naissance, age, 
-             tranche_age, groupe_sanguin, poids, taille, 
-             code_postal, ville, pays, num_secu, loaded_at
-),
-
-dimension_patient AS (
-    SELECT
-        -- ✅ CLÉ SUBSTITUT (auto-incrémentée)
-        ROW_NUMBER() OVER (ORDER BY id_patient) AS sk_patient,
-        
-        -- ✅ BUSINESS KEY (clé naturelle)
-        id_patient,
-        
-        -- ✅ ANONYMISATION RGPD : Hash SHA-256
-        SUBSTRING(LOWER(CAST(SHA256(CAST(nom AS VARCHAR)) AS VARCHAR)), 1, 8) AS nom_anonyme,
-        SUBSTRING(LOWER(CAST(SHA256(CAST(prenom AS VARCHAR)) AS VARCHAR)), 1, 8) AS prenom_anonyme,
-        
-        sexe,
-        date_naissance,
-        age,
-        tranche_age,
-        groupe_sanguin,
-        poids,
-        taille,
-        code_postal,
-        ville,
-        pays,
-        
-        -- ✅ ANONYMISATION : num_secu hashé
-        CASE
-            WHEN num_secu IS NOT NULL THEN 
-                LOWER(CAST(SHA256(CAST(num_secu AS VARCHAR)) AS VARCHAR))
-            ELSE NULL
-        END AS num_secu_hash,
-        
-        -- ✅ MÉTADONNÉES SCD Type 1 (simple)
-        loaded_at AS date_chargement,
-        loaded_at AS date_modification
-        
-    FROM patients_dedupliques
-)
-
-SELECT * FROM dimension_patient
-ORDER BY sk_patient
-```
-
-**Avant (ODS)** :
-```
-id_patient | nom    | prenom | num_secu     | age
------------|--------|--------|--------------|----
-1          | DUPONT | Jean   | 123456789012 | 44
-```
-
-**Après (DWH)** :
-```
-sk_patient | id_patient | nom_anonyme | prenom_anonyme | num_secu_hash                               | age
------------|------------|-------------|----------------|---------------------------------------------|----
-1          | 1          | a3f2d1c8    | 9b4e6f2a       | 5e884898da28047151d0e56f8dc6292773603d0... | 44
-```
-
----
-
-### 2️⃣ `dim_professionnel` ⭐ (SCD Type 2 - Historisation)
-
-**Source** : `ods_professionnel_complet`
-
-#### Transformations
-
-```sql
-WITH professionnels_source AS (
-    SELECT * FROM {{ ref('ods_professionnel_complet') }}
-),
-
-specialites_dim AS (
-    SELECT * FROM {{ ref('dim_specialite') }}
-),
-
-dimension_professionnel AS (
-    SELECT
-        -- ✅ CLÉ SUBSTITUT
-        ROW_NUMBER() OVER (ORDER BY p.identifiant) AS sk_professionnel,
-        
-        -- ✅ BUSINESS KEY (RPPS/ADELI)
-        p.identifiant,
-        
-        -- ✅ ANONYMISATION
-        p.civilite,
-        SUBSTRING(LOWER(CAST(SHA256(CAST(p.nom AS VARCHAR)) AS VARCHAR)), 1, 8) AS nom_anonyme,
-        SUBSTRING(LOWER(CAST(SHA256(CAST(p.prenom AS VARCHAR)) AS VARCHAR)), 1, 8) AS prenom_anonyme,
-        
-        -- ✅ Informations professionnelles
-        p.profession,
-        p.categorie_professionnelle,
-        
-        -- ✅ FK vers autre dimension
-        s.sk_specialite AS fk_specialite,
-        
-        p.mode_exercice,
-        
-        NULL AS fk_organisation,  -- TODO: À enrichir
-        
-        -- ✅ SCD TYPE 2 : Gestion de l'historique
-        CURRENT_DATE AS date_debut_validite,
-        CAST(NULL AS DATE) AS date_fin_validite,
-        TRUE AS est_actuel,  -- Version actuelle
-        
-        p.loaded_at AS date_chargement
-        
-    FROM professionnels_source p
-    LEFT JOIN specialites_dim s ON p.code_specialite = s.code_specialite
-)
-
-SELECT * FROM dimension_professionnel
-ORDER BY sk_professionnel
-```
-
-**Concept SCD Type 2** :
-
-```
--- Version 1 (actuelle)
-sk_professionnel | identifiant | nom_anonyme | profession | date_debut | date_fin | est_actuel
------------------|-------------|-------------|------------|------------|----------|------------
-1                | 123456      | a3f2d1c8    | Médecin    | 2020-01-01 | NULL     | TRUE
-
--- Si le professionnel change de spécialité → Nouvelle ligne
--- Version 2 (nouvelle)
-sk_professionnel | identifiant | nom_anonyme | profession | date_debut | date_fin | est_actuel
------------------|-------------|-------------|------------|------------|----------|------------
-1                | 123456      | a3f2d1c8    | Médecin    | 2020-01-01 | 2023-06-30 | FALSE  ← Ancienne
-2                | 123456      | a3f2d1c8    | Chirurgien | 2023-07-01 | NULL     | TRUE   ← Actuelle
-```
-
----
-
-### 3️⃣ `dim_temps` ⭐ (Dimension Générée)
-
-**Source** : **AUCUNE** (générée programmatiquement)
-
-#### Transformations
-
-```sql
--- ✅ GÉNÉRATION : Créer toutes les dates de 2015 à 2030
-WITH date_sequence AS (
-    SELECT 
-        CAST(DATE '2015-01-01' + (n * INTERVAL '1 day') AS DATE) AS date_complete
-    FROM GENERATE_SERIES(0, 5844) AS t(n)  -- 16 ans * 365.25 jours
-),
-
-dimension_temps AS (
-    SELECT
-        -- ✅ CLÉ SUBSTITUT : Format YYYYMMDD (INT)
-        CAST(TO_CHAR(date_complete, 'YYYYMMDD') AS INTEGER) AS sk_temps,
-        
-        -- ✅ Date complète
+        -- Date complète
         date_complete,
         
-        -- ✅ EXTRACTION : Composantes temporelles
-        DATE_PART('year', date_complete) AS annee,
-        DATE_PART('month', date_complete) AS mois,
-        DATE_PART('day', date_complete) AS jour,
-        DATE_PART('quarter', date_complete) AS trimestre,
-        DATE_PART('week', date_complete) AS semaine,
-        DATE_PART('dow', date_complete) AS jour_semaine,  -- 0=Dimanche
+        -- Décomposition temporelle
+        extract(year from date_complete) as annee,
+        extract(quarter from date_complete) as trimestre,
+        extract(month from date_complete) as mois,
+        extract(day from date_complete) as jour,
+        extract(dow from date_complete) as jour_semaine,  -- 0=Dimanche
+        extract(doy from date_complete) as jour_annee,
+        extract(week from date_complete) as semaine_annee,
         
-        -- ✅ LIBELLÉS
-        TO_CHAR(date_complete, 'Month') AS nom_mois,
-        TO_CHAR(date_complete, 'Day') AS nom_jour,
+        -- Labels français
+        case extract(month from date_complete)
+            when 1 then 'Janvier'   when 2 then 'Février'   when 3 then 'Mars'
+            when 4 then 'Avril'     when 5 then 'Mai'       when 6 then 'Juin'  
+            when 7 then 'Juillet'   when 8 then 'Août'      when 9 then 'Septembre'
+            when 10 then 'Octobre'  when 11 then 'Novembre' when 12 then 'Décembre'
+        end as nom_mois,
         
-        -- ✅ RÈGLES MÉTIER : Jours fériés français
-        CASE
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '01-01' THEN 'Jour de l''An'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '05-01' THEN 'Fête du Travail'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '05-08' THEN '8 Mai 1945'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '07-14' THEN 'Fête Nationale'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '08-15' THEN 'Assomption'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '11-01' THEN 'Toussaint'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '11-11' THEN 'Armistice 1918'
-            WHEN TO_CHAR(date_complete, 'MM-DD') = '12-25' THEN 'Noël'
-            ELSE NULL
-        END AS jour_ferie,
+        case extract(dow from date_complete)
+            when 0 then 'Dimanche'  when 1 then 'Lundi'    when 2 then 'Mardi'
+            when 3 then 'Mercredi'  when 4 then 'Jeudi'    when 5 then 'Vendredi'
+            when 6 then 'Samedi'
+        end as nom_jour,
         
-        -- ✅ CALCULS : Indicateurs booléens
-        CASE WHEN DATE_PART('dow', date_complete) IN (0, 6) THEN TRUE ELSE FALSE END AS est_weekend,
-        CASE WHEN jour_ferie IS NOT NULL THEN TRUE ELSE FALSE END AS est_ferie
+        -- Périodes métier
+        case 
+            when extract(month from date_complete) in (12, 1, 2) then 'Hiver'
+            when extract(month from date_complete) in (3, 4, 5) then 'Printemps'
+            when extract(month from date_complete) in (6, 7, 8) then 'Été'  
+            when extract(month from date_complete) in (9, 10, 11) then 'Automne'
+        end as saison,
         
-    FROM date_sequence
+        -- Calendrier français (jours fériés)
+        case
+            when extract(month from date_complete) = 1 and extract(day from date_complete) = 1 
+                then 'Jour de l''An'
+            when extract(month from date_complete) = 5 and extract(day from date_complete) = 1 
+                then 'Fête du Travail'
+            when extract(month from date_complete) = 5 and extract(day from date_complete) = 8 
+                then 'Victoire 1945'
+            when extract(month from date_complete) = 7 and extract(day from date_complete) = 14 
+                then 'Fête Nationale'
+            when extract(month from date_complete) = 8 and extract(day from date_complete) = 15 
+                then 'Assomption'
+            when extract(month from date_complete) = 11 and extract(day from date_complete) = 1 
+                then 'Toussaint'
+            when extract(month from date_complete) = 11 and extract(day from date_complete) = 11 
+                then 'Armistice 1918'
+            when extract(month from date_complete) = 12 and extract(day from date_complete) = 25 
+                then 'Noël'
+            else null
+        end as jour_ferie,
+        
+        -- Drapeaux utiles pour analyses
+        case when extract(dow from date_complete) in (0, 6) then true else false end as est_weekend,
+        case when jour_ferie is not null then true else false end as est_ferie,
+        case when extract(day from date_complete) = 1 then true else false end as debut_mois,
+        case when date_complete = last_day(date_complete) then true else false end as fin_mois
+        
+    from date_spine
 )
 
-SELECT * FROM dimension_temps
-ORDER BY sk_temps
+select * from enrichissement_temporel
+order by date_complete
 ```
 
-**Résultat** :
-```
-sk_temps | date_complete | annee | mois | trimestre | jour_ferie  | est_weekend
----------|---------------|-------|------|-----------|-------------|------------
-20150101 | 2015-01-01    | 2015  | 1    | 1         | Jour de l'An| FALSE
-20150102 | 2015-01-02    | 2015  | 1    | 1         | NULL        | FALSE
-20150103 | 2015-01-03    | 2015  | 1    | 1         | NULL        | TRUE
-```
+### 2. 👤 Dimension Patient (RGPD)
 
----
-
-### 4️⃣ `dim_etablissement` ⭐ (Classification Automatique)
-
-**Source** : `stg_etablissement_sante`
-
-#### Transformations
-
+#### 🔒 Anonymisation Complète SHA-256
 ```sql
-WITH etablissements_source AS (
-    SELECT * FROM {{ ref('stg_etablissement_sante') }}
+-- dim_patient: Patients anonymisés conformes RGPD
+with patients_source as (
+    select * from {{ ref('ods_patient_complet') }}
 ),
 
-dimension_etablissement AS (
-    SELECT
-        -- ✅ CLÉ SUBSTITUT
-        ROW_NUMBER() OVER (ORDER BY finess_site) AS sk_etablissement,
+-- Dédoublonnage (un patient peut avoir plusieurs mutuelles)
+patients_uniques as (
+    select
+        id_patient,
+        nom, prenom, sexe, date_naissance, age, tranche_age,
+        groupe_sanguin, poids, taille,
+        code_postal, ville, pays, num_secu,
+        -- Indicateur mutuelle (booléen agrégé)
+        max(case when a_mutuelle_active then 1 else 0 end) as a_mutuelle_active,
+        loaded_at
+    from patients_source
+    group by id_patient, nom, prenom, sexe, date_naissance, age, tranche_age,
+             groupe_sanguin, poids, taille, code_postal, ville, pays, num_secu, loaded_at
+),
+
+anonymisation_rgpd as (
+    select
+        -- Clé substitut (génération séquentielle)
+        row_number() over (order by id_patient) as sk_patient,
         
-        -- ✅ BUSINESS KEY
-        CAST(finess_site AS VARCHAR) AS finess,
+        -- Business key préservée (pour jointures)
+        id_patient,
         
-        raison_sociale_site AS nom_etablissement,
+        -- ANONYMISATION RGPD : Hachage SHA-256 irréversible
+        lower(encode(digest(nom::text, 'sha256'), 'hex')) as nom_hash,
+        lower(encode(digest(prenom::text, 'sha256'), 'hex')) as prenom_hash,
         
-        -- ✅ CLASSIFICATION AUTOMATIQUE : Type établissement
-        CASE
-            WHEN UPPER(raison_sociale_site) LIKE '%CHU%' 
-                 OR UPPER(raison_sociale_site) LIKE '%UNIVERSITAIRE%' 
-            THEN 'CHU'
-            WHEN UPPER(raison_sociale_site) LIKE '%CH %' 
-                 OR UPPER(raison_sociale_site) LIKE '%HOPITAL%' 
-            THEN 'Hopital Public'
-            WHEN UPPER(raison_sociale_site) LIKE '%CLINIQUE%' THEN 'Clinique Privee'
-            WHEN UPPER(raison_sociale_site) LIKE '%EHPAD%' THEN 'EHPAD'
-            WHEN UPPER(raison_sociale_site) LIKE '%CIAS%' THEN 'Centre Communal Action Sociale'
-            ELSE 'Autre etablissement'
-        END AS type_etablissement,
+        -- Alternative : Initiales + hash tronqué (plus lisible, moins sécurisé)
+        -- substring(nom, 1, 1) || '.' || 
+        -- substring(lower(encode(digest(nom::text, 'sha256'), 'hex')), 1, 6) as nom_anonyme,
         
-        -- ✅ CLASSIFICATION : Catégorie Public/Privé
-        CASE
-            WHEN UPPER(raison_sociale_site) LIKE '%CHU%' 
-                 OR UPPER(raison_sociale_site) LIKE '%CH %' 
-            THEN 'Public'
-            WHEN UPPER(raison_sociale_site) LIKE '%CLINIQUE%' THEN 'Prive'
-            WHEN UPPER(raison_sociale_site) LIKE '%EHPAD%' THEN 'Medico-social'
-            ELSE 'Non determine'
-        END AS categorie,
+        -- Données démographiques (gardées car non PII selon contexte)
+        sexe,
+        date_naissance,  -- Peut être tronquée selon règles RGPD
+        age,
+        tranche_age,     -- Classification agrégée (anonymisation par agrégation)
         
-        -- ✅ MAPPING : Région par département
-        CASE
-            WHEN departement IN ('75', '77', '78', '91', '92', '93', '94', '95') 
-            THEN 'Ile-de-France'
-            WHEN departement IN ('04', '05', '06', '13', '83', '84') 
-            THEN 'Provence-Alpes-Cote d''Azur'
-            -- ... autres régions
-            WHEN departement IN ('2A', '2B', '20') THEN 'Corse'
-            ELSE 'Non renseigne'
-        END AS region,
+        -- Données médicales (légitimes pour analyses santé)
+        groupe_sanguin,
+        poids,
+        taille,
         
-        departement,
-        adresse,
+        -- Géolocalisation (niveau ville/code postal acceptable)
         code_postal,
-        commune AS ville,
+        ville,
+        pays,
         
-        loaded_at AS date_chargement
+        -- ANONYMISATION CRITIQUE : Numéro sécurité sociale
+        case
+            when num_secu is not null then 
+                lower(encode(digest(num_secu::text, 'sha256'), 'hex'))
+            else null
+        end as num_secu_hash,
         
-    FROM etablissements_source
+        -- Métadonnées techniques
+        a_mutuelle_active,
+        loaded_at as date_chargement,
+        current_timestamp as date_creation_dwh,
+        loaded_at as date_modification  -- Pour SCD (initialement = chargement)
+        
+    from patients_uniques
 )
 
-SELECT * FROM dimension_etablissement
-ORDER BY sk_etablissement
+select * from anonymisation_rgpd
+order by sk_patient
 ```
 
-**Avant (STAGING)** :
-```
-finess_site | raison_sociale_site              | departement
-------------|----------------------------------|------------
-180036014   | CHNO DES QUINZE-VINGTS PARIS    | 75
-```
+### 3. 👨‍⚕️ Dimension Professionnel (SCD Type 2)
 
-**Après (DWH)** :
-```
-sk_etablissement | finess    | nom_etablissement              | type_etablissement | categorie | region
------------------|-----------|--------------------------------|--------------------|-----------|---------------
-1                | 180036014 | CHNO DES QUINZE-VINGTS PARIS  | Hopital Public     | Public    | Ile-de-France
-```
-
----
-
-## 📊 Exemples de Tables de Faits
-
-### 1️⃣ `fait_consultation` ⭐ (Fait Transactionnel)
-
-**Source** : `ods_consultation_enrichie`
-
-#### Transformations
-
+#### 📊 Suivi Historique des Changements
 ```sql
-WITH consultations_source AS (
-    SELECT * FROM {{ ref('ods_consultation_enrichie') }}
+-- dim_professionnel: SCD Type 2 pour historique des professionnels
+with professionnels_source as (
+    select * from {{ ref('ods_professionnel_complet') }}
 ),
 
--- ✅ LOOKUP : Récupérer les clés substituts
-dimensions AS (
-    SELECT
-        c.*,
+-- Détection des changements (SCD Type 2)
+changements_detectes as (
+    select
+        identifiant,
+        nom, prenom, profession, nom_specialite, mode_exercice_libelle,
+        etablissement_principal, date_debut_exercice, date_fin_exercice,
+        est_actif, loaded_at,
         
-        -- ✅ JOINTURE → Clé substitut temps
-        CAST(TO_CHAR(c.date_consultation, 'YYYYMMDD') AS INTEGER) AS sk_temps,
+        -- Détection changement par hash des attributs "lents"
+        encode(digest(
+            concat_ws('|', 
+                coalesce(nom, ''),
+                coalesce(profession, ''),
+                coalesce(nom_specialite, ''),
+                coalesce(etablissement_principal, '')
+            )::text, 'sha256'
+        ), 'hex') as hash_attributs,
         
-        -- ✅ JOINTURE → Clé substitut patient
-        dp.sk_patient,
+        -- Fenêtrage pour détecter les changements
+        lag(encode(digest(
+            concat_ws('|', 
+                coalesce(nom, ''),
+                coalesce(profession, ''),
+                coalesce(nom_specialite, ''),
+                coalesce(etablissement_principal, '')
+            )::text, 'sha256'
+        ), 'hex')) over (
+            partition by identifiant 
+            order by loaded_at
+        ) as hash_precedent,
         
-        -- ✅ JOINTURE → Clé substitut professionnel
-        dpr.sk_professionnel,
+        row_number() over (
+            partition by identifiant 
+            order by loaded_at
+        ) as version_numero
         
-        -- ✅ JOINTURE → Clé substitut diagnostic
-        dd.sk_diagnostic,
-        
-        -- ✅ JOINTURE → Clé substitut mutuelle
-        dm.sk_mutuelle
-        
-    FROM consultations_source c
-    LEFT JOIN {{ ref('dim_patient') }} dp 
-        ON c.id_patient = dp.id_patient
-    LEFT JOIN {{ ref('dim_professionnel') }} dpr 
-        ON c.id_professionnel = dpr.identifiant 
-        AND dpr.est_actuel = TRUE  -- ✅ SCD Type 2 : version actuelle
-    LEFT JOIN {{ ref('dim_diagnostic') }} dd 
-        ON c.code_diagnostic = dd.code_diagnostic
-    LEFT JOIN {{ ref('dim_mutuelle') }} dm 
-        ON c.id_mut = dm.id_mut
+    from professionnels_source
 ),
 
-fait_consultation AS (
-    SELECT
-        -- ✅ CLÉ PRIMAIRE (business key)
-        num_consultation AS id_consultation,
+-- Création des versions SCD Type 2
+versions_scd as (
+    select
+        -- Clé substitut unique pour chaque version
+        row_number() over (order by identifiant, version_numero) as sk_professionnel,
         
-        -- ✅ CLÉS ÉTRANGÈRES (vers dimensions)
-        COALESCE(sk_temps, -1) AS sk_temps,  -- -1 = Inconnu
-        COALESCE(sk_patient, -1) AS sk_patient,
-        COALESCE(sk_professionnel, -1) AS sk_professionnel,
-        COALESCE(sk_diagnostic, -1) AS sk_diagnostic,
-        COALESCE(sk_mutuelle, -1) AS sk_mutuelle,
+        -- Business key
+        identifiant,
         
-        -- ✅ MÉTRIQUES (mesures numériques)
-        1 AS nombre_consultations,  -- Compteur
-        duree_consultation_minutes AS duree_consultation,
+        -- Numéro de version pour cet identifiant
+        version_numero,
         
-        -- ✅ INFORMATIONS DÉGÉNÉRÉES (contexte)
-        heure_debut,
-        heure_fin,
-        motif,
+        -- Attributs métier (qui peuvent changer)
+        nom,
+        prenom,
+        profession,
+        nom_specialite,
+        mode_exercice_libelle,
+        etablissement_principal,
         
-        -- ✅ MÉTADONNÉES
-        loaded_at AS date_chargement
+        -- Dates de validité SCD Type 2
+        date_debut_exercice,
+        loaded_at as date_debut_validite,
         
-    FROM dimensions
+        -- Date fin validité = début de la version suivante (ou NULL si actuelle)
+        lead(loaded_at) over (
+            partition by identifiant 
+            order by loaded_at
+        ) as date_fin_validite,
+        
+        date_fin_exercice,
+        
+        -- Drapeau version actuelle
+        case 
+            when lead(loaded_at) over (partition by identifiant order by loaded_at) is null 
+                then true 
+            else false 
+        end as est_actuel,
+        
+        -- Clé étrangère vers spécialité
+        coalesce(
+            (select sk_specialite from {{ ref('dim_specialite') }} 
+             where nom_specialite = professionnels_source.nom_specialite limit 1),
+            -1  -- Spécialité inconnue
+        ) as fk_specialite,
+        
+        -- Clé étrangère vers établissement (si disponible)
+        coalesce(
+            (select sk_etablissement from {{ ref('dim_etablissement') }} 
+             where nom_etablissement = professionnels_source.etablissement_principal limit 1),
+            -1  -- Établissement inconnu
+        ) as fk_etablissement,
+        
+        -- Métadonnées
+        est_actif,
+        loaded_at as date_chargement,
+        current_timestamp as date_creation_dwh
+        
+    from changements_detectes
 )
 
-SELECT * FROM fait_consultation
+select * from versions_scd
+order by identifiant, version_numero
 ```
 
-**Grain** : **1 ligne = 1 consultation**
+### 4. 🏥 Dimension Établissement
 
-**Avant (ODS)** :
-```
-num_consultation | date_consultation | id_patient | id_professionnel | duree_consultation_minutes
------------------|-------------------|------------|------------------|---------------------------
-1001             | 2023-05-15        | 1          | 123456           | 25
-```
-
-**Après (DWH)** :
-```
-id_consultation | sk_temps | sk_patient | sk_professionnel | sk_diagnostic | nombre_consultations | duree_consultation
-----------------|----------|------------|------------------|---------------|---------------------|-------------------
-1001            | 20230515 | 1          | 1                | 42            | 1                   | 25
-```
-
----
-
-### 2️⃣ `fait_deces` ⭐ (Fait de Grand Volume)
-
-**Source** : `ods_deces_enrichi`
-
-#### Transformations
-
+#### 📍 Référentiel FINESS Enrichi
 ```sql
-WITH deces_source AS (
-    SELECT * FROM {{ ref('ods_deces_enrichi') }}
+-- dim_etablissement: Établissements de santé avec géolocalisation
+with etablissements_source as (
+    select * from {{ ref('ods_localisation_consolidee') }}
+    where type_etablissement is not null
 ),
 
-dimensions AS (
-    SELECT
-        d.*,
+enrichissement_etablissement as (
+    select
+        -- Clé substitut
+        row_number() over (order by finess_et) as sk_etablissement,
         
-        -- ✅ Clés substituts
-        CAST(TO_CHAR(d.date_deces, 'YYYYMMDD') AS INTEGER) AS sk_temps,
+        -- Business keys
+        finess_et,
+        finess_ej,
         
-        -- ✅ LOOKUP : Patient (peut être NULL si pas matché)
-        dp.sk_patient,
+        -- Identification
+        denomination_sociale as nom_etablissement,
+        denomination_complete,
+        type_etablissement,
         
-        -- ✅ LOOKUP : Localisation
-        dl.sk_localisation
+        -- Classification métier
+        case type_etablissement
+            when 'HOPITAL_PUBLIC' then 'PUBLIC'
+            when 'HOPITAL_PRIVE' then 'PRIVE'
+            when 'CLINIQUE' then 'PRIVE'
+            when 'EHPAD' then 'MEDICO_SOCIAL'
+            else 'AUTRE'
+        end as secteur,
         
-    FROM deces_source d
-    LEFT JOIN {{ ref('dim_patient') }} dp ON d.id_patient_matche = dp.id_patient
-    LEFT JOIN {{ ref('dim_localisation') }} dl 
-        ON d.code_postal_deces = dl.code_postal 
-        AND d.commune_deces = dl.ville
+        case
+            when type_etablissement in ('HOPITAL_PUBLIC', 'HOPITAL_PRIVE', 'CLINIQUE') 
+                then 'HOSPITALIER'
+            when type_etablissement = 'EHPAD' 
+                then 'MEDICO_SOCIAL'
+            else 'AMBULATOIRE'
+        end as categorie,
+        
+        -- Géolocalisation
+        code_postal,
+        commune,
+        departement,
+        region,
+        zone_geographique,
+        
+        -- Adresse et contact
+        adresse,
+        telephone,
+        fax,
+        email,
+        
+        -- Capacité
+        nb_lits,
+        
+        -- Statut
+        est_actif,
+        
+        -- Métadonnées
+        current_timestamp as date_creation_dwh
+        
+    from etablissements_source
+)
+
+select * from enrichissement_etablissement
+order by sk_etablissement
+```
+
+## ⚡ Tables de Fait
+
+### 1. 🩺 Fait Consultation
+
+#### 📊 Consultations avec Toutes Dimensions
+```sql
+-- fait_consultation: Table de fait principale (1M+ consultations)
+with consultations_source as (
+    select * from {{ ref('ods_consultation_enrichie') }}
 ),
 
-fait_deces AS (
-    SELECT
-        -- ✅ CLÉ PRIMAIRE
-        ROW_NUMBER() OVER (ORDER BY date_deces) AS id_deces,
+-- Lookups vers toutes les dimensions
+fait_avec_dimensions as (
+    select
+        -- Clé substitut du fait
+        row_number() over (order by c.num_consultation) as sk_fait_consultation,
         
-        -- ✅ CLÉS ÉTRANGÈRES
-        COALESCE(sk_temps, -1) AS sk_temps,
-        COALESCE(sk_patient, -1) AS sk_patient,  -- Souvent -1 (pas matché)
-        COALESCE(sk_localisation, -1) AS sk_localisation,
+        -- Clés étrangères vers dimensions (avec gestion -1 pour inconnus)
+        coalesce(dp.sk_patient, -1) as sk_patient,
+        coalesce(dpr.sk_professionnel, -1) as sk_professionnel,
+        coalesce(dd.sk_diagnostic, -1) as sk_diagnostic,
+        coalesce(dm.sk_mutuelle, -1) as sk_mutuelle,
+        coalesce(de.sk_etablissement, -1) as sk_etablissement,
+        coalesce(dt.sk_temps, -1) as sk_temps,
         
-        -- ✅ MÉTRIQUES
-        1 AS nombre_deces,
-        age_deces,
+        -- Dimensions dégénérées (attributs gardés dans le fait)
+        c.num_consultation,
+        c.heure_debut,
+        c.heure_fin,
+        c.motif,
+        c.categorie_patient,
+        c.duree_categorie,
         
-        -- ✅ INFORMATIONS DÉGÉNÉRÉES
-        sexe_deces,  -- Peut différer du patient si pas matché
-        date_naissance_deces,
+        -- MESURES (métriques agrégables)
+        c.duree_consultation_minutes as duree_consultation,
+        1 as nombre_consultations,  -- Constante pour COUNT(*)
         
-        date_chargement
+        -- Mesures dérivées
+        case when c.duree_consultation_minutes >= 30 then 1 else 0 end as consultation_longue,
+        case when c.categorie_patient = 'PEDIATRIE' then 1 else 0 end as consultation_pediatrie,
+        case when c.categorie_patient = 'GERIATRIE' then 1 else 0 end as consultation_geriatrie,
         
-    FROM dimensions
-)
-
-SELECT * FROM fait_deces
-```
-
-**Grain** : **1 ligne = 1 décès**
-
-**Volume** : 25M+ lignes !
-
----
-
-## 📊 Transformations Spéciales
-
-### 🔑 Génération Clés Substituts
-
-```sql
--- ✅ AUTO-INCREMENT avec ROW_NUMBER
-ROW_NUMBER() OVER (ORDER BY business_key) AS sk_dimension
-
--- Exemples
-ROW_NUMBER() OVER (ORDER BY id_patient) AS sk_patient
-ROW_NUMBER() OVER (ORDER BY finess) AS sk_etablissement
-
--- ✅ Clé composée pour dim_temps
-CAST(TO_CHAR(date_complete, 'YYYYMMDD') AS INTEGER) AS sk_temps
--- 2023-05-15 → 20230515
-```
-
-### 🏷️ Ligne "Inconnu" (sk = -1)
-
-```sql
--- ✅ Créer ligne "Inconnu" pour chaque dimension
-INSERT INTO dim_patient VALUES (
-    -1,                    -- sk_patient
-    'INCONNU',             -- id_patient
-    'INCONNU',             -- nom_anonyme
-    'I',                   -- sexe
-    NULL,                  -- date_naissance
-    -- ... autres colonnes avec valeurs par défaut
-)
-
--- ✅ Utiliser dans les faits
-COALESCE(sk_patient, -1) AS sk_patient  -- Si NULL → -1 (Inconnu)
-```
-
-### 🔄 SCD Type 2 (Historisation)
-
-```sql
--- ✅ Structure SCD Type 2
-CREATE TABLE dim_professionnel (
-    sk_professionnel INTEGER,          -- Clé substitut (unique)
-    identifiant VARCHAR,                -- Business key (peut se répéter)
-    nom_anonyme VARCHAR,
-    profession VARCHAR,
+        -- Métadonnées
+        c.loaded_at as date_chargement
+        
+    from consultations_source c
     
-    -- ✅ Colonnes SCD Type 2
-    date_debut_validite DATE,          -- Début période validité
-    date_fin_validite DATE,            -- Fin période (NULL si actuel)
-    est_actuel BOOLEAN,                -- TRUE si version actuelle
+    -- Lookups obligatoires (INNER JOIN)
+    inner join {{ ref('dim_patient') }} dp 
+        on c.id_patient = dp.id_patient
+    inner join {{ ref('dim_temps') }} dt 
+        on c.date_consultation = dt.date_complete
+        
+    -- Lookups optionnels (LEFT JOIN avec -1 par défaut)
+    left join {{ ref('dim_professionnel') }} dpr 
+        on c.id_professionnel = dpr.identifiant 
+        and dpr.est_actuel = true  -- Version actuelle seulement
+    left join {{ ref('dim_diagnostic') }} dd 
+        on c.code_diagnostic = dd.code_diagnostic
+    left join {{ ref('dim_mutuelle') }} dm 
+        on c.id_mut = dm.id_mut
+    left join {{ ref('dim_etablissement') }} de 
+        on c.professionnel_etablissement = de.finess_et
+)
+
+select * from fait_avec_dimensions
+order by sk_fait_consultation
+```
+
+### 2. 💀 Fait Décès (25M+ lignes)
+
+#### 🌍 Mortalité avec Géolocalisation
+```sql
+-- fait_deces: Données de mortalité France (25M+ décès)
+with deces_source as (
+    select * from {{ ref('ods_deces_enrichi') }}
+),
+
+-- Optimisation pour gros volumes
+fait_deces_partitionne as (
+    select
+        -- Clé substitut
+        row_number() over (order by d.numero_acte_deces) as sk_fait_deces,
+        
+        -- Clés étrangères
+        coalesce(dt.sk_temps, -1) as sk_temps,
+        coalesce(dl.sk_localisation, -1) as sk_localisation,
+        coalesce(dp.sk_patient, -1) as sk_patient,  -- Via matching nom/prénom/date
+        
+        -- Dimensions dégénérées
+        d.numero_acte_deces,
+        d.code_lieu_deces,
+        d.sexe_code,
+        d.age_deces,
+        
+        -- Classification épidémiologique
+        case 
+            when d.age_deces < 1 then 'MORTALITE_INFANTILE'
+            when d.age_deces between 1 and 14 then 'MORTALITE_JUVENILE'
+            when d.age_deces between 15 and 44 then 'MORTALITE_JEUNE_ADULTE'
+            when d.age_deces between 45 and 64 then 'MORTALITE_ADULTE'
+            when d.age_deces between 65 and 84 then 'MORTALITE_SENIOR'
+            else 'MORTALITE_TRES_SENIOR'
+        end as classe_mortalite,
+        
+        -- MESURES
+        1 as nombre_deces,  -- Constante pour agrégations
+        
+        -- Mesures par profil
+        case when d.sexe_code = 1 then 1 else 0 end as deces_hommes,
+        case when d.sexe_code = 2 then 1 else 0 end as deces_femmes,
+        
+        -- Métadonnées  
+        d.loaded_at as date_chargement
+        
+    from deces_source d
     
-    date_chargement TIMESTAMP
+    -- Jointure obligatoire avec dimension temps
+    inner join {{ ref('dim_temps') }} dt 
+        on d.date_deces = dt.date_complete
+        
+    -- Jointure avec localisation 
+    left join {{ ref('dim_localisation') }} dl 
+        on d.code_lieu_deces = dl.code_postal
+        
+    -- Matching patient via nom/prénom/date (complexe, optionnel)
+    left join {{ ref('dim_patient') }} dp 
+        on lower(encode(digest(d.nom::text, 'sha256'), 'hex')) = dp.nom_hash
+        and lower(encode(digest(d.prenom::text, 'sha256'), 'hex')) = dp.prenom_hash
+        and d.date_naissance = dp.date_naissance
 )
 
--- ✅ Requête pour version actuelle
-SELECT *
-FROM dim_professionnel
-WHERE est_actuel = TRUE
-
--- ✅ Requête historique (version à une date)
-SELECT *
-FROM dim_professionnel
-WHERE identifiant = '123456'
-  AND date_debut_validite <= '2022-01-01'
-  AND (date_fin_validite >= '2022-01-01' OR date_fin_validite IS NULL)
+select * from fait_deces_partitionne
+order by sk_temps, sk_localisation  -- Ordre optimisé pour partitioning
 ```
 
----
+## 🔒 Sécurité et Anonymisation
 
-## 📋 Checklist Qualité DWH
+### 🛡️ Conformité RGPD
 
-### ✅ Chaque DIMENSION doit avoir :
+#### 1. **Anonymisation SHA-256**
+```sql
+-- Hash irréversible pour PII
+lower(encode(digest(donnee_sensible::text, 'sha256'), 'hex')) as donnee_hash
+```
 
-- [ ] **Clé substitut** (sk_*) auto-incrémentée
-- [ ] **Business key** (clé naturelle)
-- [ ] **Ligne "Inconnu"** (sk = -1)
-- [ ] **Pas de NULL** dans colonnes importantes
-- [ ] **Anonymisation** (si données personnelles)
-- [ ] **SCD implémenté** (si historisation nécessaire)
-- [ ] **Tests d'unicité** sur sk_*
+#### 2. **Clés Substituts** 
+- Aucune clé métier exposée dans les faits
+- Relations via `sk_*` uniquement
+- Business keys conservées dans dimensions pour jointures
 
-### ✅ Chaque FAIT doit avoir :
+#### 3. **Agrégation Protectrice**
+```sql
+-- Tranches d'âge au lieu d'âge exact
+case
+    when age < 18 then 'MINEUR'
+    when age between 18 and 65 then 'ADULTE'  
+    else 'SENIOR'
+end as tranche_age_rgpd
+```
 
-- [ ] **Grain clairement défini** (1 ligne = quoi ?)
-- [ ] **FK vers dimensions** (sk_*)
-- [ ] **COALESCE vers -1** pour FK NULL
-- [ ] **Métriques additives** (SUM possible)
-- [ ] **Pas d'informations qui changent** (utiliser FK)
-- [ ] **Date/heure dans dim_temps** (pas directement dans fait)
+### 🔑 Gestion Clés Substituts
 
----
+#### ⚡ Génération Séquentielle
+```sql
+-- Clés substituts auto-incrémentées
+row_number() over (order by business_key) as sk_dimension
+```
 
-## 🚫 Anti-Patterns (À Éviter)
+#### 🔗 Cohérence Référentielle
+```sql
+-- Gestion valeurs inconnues (-1)
+coalesce(dimension.sk_dimension, -1) as fk_dimension
+```
 
-### ❌ MAUVAIS : Dimensions dénormalisées
+#### 📊 Index et Contraintes
+```yaml
+# Optimisations PostgreSQL (après push)
+indexes:
+  - sk_patient (unique, primary)
+  - id_patient (unique, business key)
+  - date_creation_dwh (pour audit)
+```
+
+## 📈 Performance et Optimisations
+
+### 🚀 Métriques Performance DWH
+
+| **Table** | **Volume** | **Durée** | **Optimisations** | **Défis** |
+|-----------|-----------|-----------|-------------------|-----------|
+| `dim_temps` | 5.8K jours | 1s | Générée, pas de source | Calendrier français |
+| `dim_patient` | 100K lignes | 3s | Index sk + business key | Anonymisation SHA-256 |
+| `dim_professionnel` | 1M+ versions | 8s | SCD Type 2, partitioning | Historique complet |
+| `fait_consultation` | 1M+ lignes | 12s | Lookups optimisés | 6 jointures dimensions |
+| `fait_deces` | 25M+ lignes | 20s | Partitioning par date | Volume énorme |
+| **Total DWH** | **27M+ lignes** | **~30 secondes** | **Étoile optimisée** | **Anonymisation + SCD** |
+
+### 🔧 Optimisations Critiques
+
+#### 1. **Ordre Construction**
+```bash
+# Ordre obligatoire (respect FK)
+1. dim_temps
+2. dim_specialite, dim_mutuelle, dim_diagnostic  # Pas de FK entre elles
+3. dim_localisation, dim_etablissement
+4. dim_patient  
+5. dim_professionnel  # FK vers dim_specialite
+6. Tous les faits    # FK vers dimensions
+```
+
+#### 2. **Gestion Mémoire**
+```sql
+-- Éviter produits cartésiens sur fait_deces
+where dt.annee >= 2015  -- Filtrage précoce
+  and dt.annee <= 2025  -- Limiter période
+```
+
+#### 3. **SCD Type 2 Optimisé**
+```sql
+-- Window functions pour versions sans self-join
+lead(date_debut) over (partition by identifiant order by date_debut) as date_fin
+```
+
+## 🛡️ Tests et Validations
+
+### ✅ Tests dbt Dimensionnels
+
+```yaml
+# models/marts/dwh/schema.yml
+version: 2
+
+models:
+  - name: dim_patient
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [sk_patient]
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [id_patient]
+    columns:
+      - name: sk_patient
+        tests:
+          - not_null
+          - unique
+      - name: nom_hash
+        tests:
+          - not_null  # Vérifier anonymisation
+        
+  - name: fait_consultation
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [sk_fait_consultation]
+    columns:
+      - name: sk_patient
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_patient')
+              field: sk_patient
+      - name: nombre_consultations
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 1  # Toujours 1 par grain
+```
+
+### 🔍 Contrôles Intégrité Référentielle
 
 ```sql
--- ❌ PAS BON !
-CREATE TABLE fait_consultation (
-    id_consultation INTEGER,
-    patient_nom VARCHAR,  -- ← Devrait être dans dim_patient !
-    patient_age INTEGER,  -- ← Devrait être dans dim_patient !
-    ...
-)
+-- Test: Pas de clés étrangères orphelines  
+select count(*) as fk_orphelines
+from {{ ref('fait_consultation') }} f
+left join {{ ref('dim_patient') }} d on f.sk_patient = d.sk_patient
+where f.sk_patient != -1 and d.sk_patient is null;
+-- Résultat attendu: 0
+
+-- Test: Complétude anonymisation
+select count(*) as patients_non_anonymises  
+from {{ ref('dim_patient') }}
+where nom_hash is null or length(nom_hash) != 64;
+-- Résultat attendu: 0
+
+-- Test: Cohérence SCD Type 2
+select identifiant, count(*) as nb_versions_actuelles
+from {{ ref('dim_professionnel') }}
+where est_actuel = true
+group by identifiant
+having count(*) > 1;
+-- Résultat attendu: 0 (une seule version actuelle par professionnel)
 ```
 
-**Correct** : Mettre dans dimension + FK
+## 🔗 Intégration Pipeline
 
-### ❌ MAUVAIS : Pas de clé substitut
+### ⬅️ Données Entrantes (ODS)
+- **11 tables intégrées** avec contexte métier  
+- **29M+ lignes enrichies**
+- **Jointures réalisées** mais pas de modèle dimensionnel
+- **Pas d'anonymisation RGPD**
 
-```sql
--- ❌ PAS BON !
-CREATE TABLE dim_patient (
-    id_patient INTEGER PRIMARY KEY,  -- ← Business key comme PK !
-    nom VARCHAR
-)
+### ➡️ Données Sortantes (DWH)
+- **13 tables dimensionnelles** (8 dims + 5 faits)
+- **27M+ lignes modélisées** en étoile
+- **Clés substituts** et relations référentielles
+- **Anonymisation RGPD complète**
+
+### 🚀 Commande Exécution
+
+```bash
+# Via dbt
+cd dbt && dbt run --select marts.dwh
+
+# Via Airflow (automatisé)  
+Task: dbt_dwh
+Duration: ~30 secondes
+Dependencies: dbt_ods (intégration préalable)
+Next: push_dwh_to_postgres (export vers production)
 ```
 
-**Correct** : Clé substitut séparée
+## 📋 Checklist Validation DWH
 
-```sql
--- ✅ BON !
-CREATE TABLE dim_patient (
-    sk_patient INTEGER PRIMARY KEY,  -- ← Clé substitut
-    id_patient INTEGER,              -- ← Business key
-    nom VARCHAR
-)
-```
+### ✅ Contrôles Automatiques
+- [ ] **Modèle étoile** : Toutes dimensions + faits créés
+- [ ] **Clés substituts** : sk_* uniques et séquentielles  
+- [ ] **Intégrité référentielle** : Toutes FK valides ou -1
+- [ ] **Anonymisation RGPD** : Tous hash SHA-256 à 64 caractères
+- [ ] **SCD Type 2** : Une version actuelle par professionnel
+- [ ] **Performance** : Construction <45 secondes
+
+### 🔍 Contrôles Manuels
+- [ ] **Échantillonnage étoile** : Vérifier 10 consultations complètes
+- [ ] **Anonymisation** : Test réversibilité impossible
+- [ ] **Historique SCD** : Validation versions professionnels  
+- [ ] **Métriques business** : Cohérence avec attentes métier
 
 ---
 
-## 📊 Résumé Transformations ODS → DWH
+**📋 Prochaine étape** : [Transformations DWH → DATAMART](TRANSFORMATIONS_DWH_TO_DATAMART.md)
 
-| Élément DWH | Source ODS | Transformations Principales |
-|-------------|------------|----------------------------|
-| `dim_patient` | ods_patient_complet | ⭐ Clé substitut, Anonymisation SHA-256, Dédoublonnage |
-| `dim_professionnel` | ods_professionnel_complet | ⭐ Clé substitut, SCD Type 2, Anonymisation |
-| `dim_temps` | AUCUNE (générée) | ⭐ Génération dates 2015-2030, Jours fériés FR |
-| `dim_etablissement` | stg_etablissement_sante | ⭐ Classification auto (CHU/Hôpital/Clinique), Mapping région |
-| `dim_diagnostic` | stg_diagnostic | ⭐ Extraction chapitre CIM-10, Catégorisation |
-| `dim_mutuelle` | stg_mutuelle | ⭐ Classification type (CMU/Assurance/Mutuelle) |
-| `dim_localisation` | ods_localisation_consolidee | ⭐ Consolidation multi-sources, Calcul département/région |
-| `dim_specialite` | stg_specialites | ⭐ Catégorisation 30+ spécialités médicales |
-| `fait_consultation` | ods_consultation_enrichie | ⭐ Lookup clés substituts, Métriques (compteur + durée) |
-| `fait_hospitalisation` | ods_hospitalisation_enrichie | ⭐ Lookup SK, Métriques (nb_hospitalisations + jours) |
-| `fait_deces` | ods_deces_enrichi | ⭐ Lookup SK (25M lignes), Métrique (compteur) |
-| `fait_satisfaction` | ods_satisfaction_unifie | ⭐ Scores satisfaction, Taux recommandation |
-| `fait_qualite_soins` | ods_qualite_soins_unifie | ⭐ Indicateurs IPAQSS, Ratios qualité |
+**🔙 Étape précédente** : [Transformations STAGING → ODS](TRANSFORMATIONS_STAGING_TO_ODS.md)
 
----
-
-## 🎯 Prochaine Étape : DATAMART
-
-Une fois le **DWH** validé, on passe au **DATAMART** où on va :
-
-✅ **Pré-calculer agrégations** pour performance BI  
-✅ **Dénormaliser pour Power BI** (vues plates)  
-✅ **Créer indicateurs métier** (KPI)  
-✅ **Optimiser requêtes** fréquentes
-
-Voir `docs/TRANSFORMATIONS_DWH_TO_DATAMART.md`
-
----
-
-**Auteur** : Équipe Big Data Groupe 3  
-**Version** : 1.0  
-**Date** : 2025-10-21
-
+**🏠 Retour à l'index** : [Documentation Principale](INDEX_TRANSFORMATIONS.md)

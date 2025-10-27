@@ -1,739 +1,596 @@
-# 🔄 Transformations STAGING → ODS
+# 🔗 Transformations STAGING → ODS
 
-## 📋 Vue d'Ensemble
+## 🎯 Vue d'Ensemble
 
-La couche **ODS** (Operational Data Store) est la **couche d'intégration** où on combine et enrichit les données du staging.
+La couche **ODS (Operational Data Store)** constitue la deuxième phase de transformation du pipeline ETL. Son rôle principal est l'**intégration et l'enrichissement** des données nettoyées provenant du schéma STAGING. Cette étape applique les **règles métier**, effectue les **jointures complexes** et prépare les données pour la modélisation dimensionnelle.
 
-### Principe Fondamental
+### 📊 Architecture ODS
 
-> **STAGING = Nettoyage simple** (1 table → 1 table)
-> 
-> **ODS = Intégration** (N tables → 1 vue métier)
-> 
-> ✅ **Jointures autorisées** entre tables  
-> ✅ **Règles métier** appliquées  
-> ✅ **Enrichissements** métier
+```mermaid
+graph LR
+    A[🧹 STAGING Schema<br/>16 modèles nettoyés] -->|dbt run --select tag:ods| B[🔗 ODS Schema<br/>11 modèles intégrés]
+    B --> C[⭐ DWH Schema<br/>Modèle dimensionnel]
+    
+    A1[Règles Métier] --> B
+    A2[Jointures Multi-Tables] --> B
+    A3[Enrichissements] --> B
+    
+    style A fill:#e8f5e8
+    style B fill:#e3f2fd
+    style C fill:#fff3e0
+```
 
----
+## 📋 Modèles ODS (11 tables)
 
-## 🎯 Types de Transformations Appliquées
+### 🏥 Modèles Principaux (9 tables)
 
-### ✅ CE QU'ON FAIT (Autorisé dans ODS)
+| **Modèle ODS** | **Sources STAGING** | **Volume** | **Objectif Métier** |
+|---------------|-------------------|------------|-------------------|
+| `ods_patient_complet` | `stg_patient` + `stg_adher` + `stg_mutuelle` | 100K lignes | Patient enrichi avec mutuelle |
+| `ods_professionnel_complet` | `stg_professionnel_sante` + `stg_specialites` | 1M+ lignes | Professionnel avec spécialité |
+| `ods_consultation_enrichie` | `stg_consultation` + patients + professionnels + diagnostics | 1M+ lignes | Consultation avec contexte complet |
+| `ods_prescription_enrichie` | `stg_prescription` + `stg_medicaments` + patients | 2M+ lignes | Prescription avec médicament et patient |
+| `ods_hospitalisation_enrichie` | `stg_hospitalisation` + patients + diagnostics | 2.5K lignes | Séjour avec patient et diagnostic |
+| `ods_deces_enrichi` | `stg_deces` + géolocalisation | 25M+ lignes | Décès avec localisation enrichie |
+| `ods_localisation_consolidee` | `stg_etablissement_sante` + données géographiques | Variables | Référentiel géographique unifié |
+| `ods_qualite_soins_unifie` | Données satisfaction multiples sources | Variables | Indicateurs qualité consolidés |
+| `ods_satisfaction_unifie` | `int_satisfaction_esatis48h` + `int_satisfaction_esatisca` | 5K+ lignes | Satisfaction patients unifiée |
 
-| Type | Description | Exemple |
-|------|-------------|---------|
-| **Jointures** | Combiner plusieurs sources | Patient + Mutuelle |
-| **Règles métier** | Logique business | Statut actif/inactif |
-| **Calculs dérivés** | Calculs complexes | Age au moment consultation |
-| **Agrégations** | GROUP BY, COUNT, SUM | Nombre d'établissements par pro |
-| **Classifications** | CASE WHEN métier | Catégorie patient (pédiatrie/adulte/gériatrie) |
-| **Enrichissements** | Ajouter contexte métier | Libellés, descriptions |
-| **Dédoublonnage** | Window functions avancées | Garder dernière version |
+### 📊 Modèles Intermédiaires (2 tables)
 
-### ❌ CE QU'ON NE FAIT PAS ENCORE
+| **Modèle Intermédiaire** | **Sources** | **Volume** | **Rôle** |
+|-------------------------|-------------|------------|----------|
+| `int_satisfaction_esatis48h` | Tables satisfaction E-SATIS 48h | 2K lignes | Normalisation E-SATIS 48h |
+| `int_satisfaction_esatisca` | Tables satisfaction E-SATIS CA | 3K lignes | Normalisation E-SATIS Chirurgie Ambulatoire |
 
-| Type | Raison | Où le faire ? |
-|------|--------|---------------|
-| **Clés substituts (sk_*)** | Modèle dimensionnel | → **DWH** |
-| **Dimensions/Faits** | Architecture en étoile | → **DWH** |
-| **SCD Type 2** | Historisation | → **DWH** |
-| **Agrégations finales** | Pré-calculs pour BI | → **DATAMART** |
+## 🔧 Types de Transformations ODS
 
----
+### 1. 🤝 Jointures et Enrichissement
 
-## 📊 Exemples Concrets par Modèle
-
-### 1️⃣ `ods_patient_complet` ⭐ (Jointures Multiples)
-
-**Sources** : `stg_patient` + `stg_adher` + `stg_mutuelle`
-
-#### Transformations Appliquées
-
+#### 👤 Patient Complet avec Mutuelle
 ```sql
-WITH patients AS (
-    SELECT * FROM {{ ref('stg_patient') }}
-),
-
-adhesions AS (
-    SELECT * FROM {{ ref('stg_adher') }}
-),
-
-mutuelles AS (
-    SELECT * FROM {{ ref('stg_mutuelle') }}
-),
-
-patient_mutuelle AS (
-    SELECT
-        p.*,  -- Toutes les colonnes patient
-        
-        -- ✅ JOINTURES : Informations mutuelle
-        m.id_mut,
-        m.nom_mutuelle,
-        m.type_mutuelle,       -- CMU/Assurance/Mutuelle
-        a.statut_adhesion,     -- ACTIF/INACTIF
-        
-        -- ✅ RÈGLE MÉTIER : Calcul mutuelle active
-        CASE
-            WHEN m.id_mut IS NOT NULL 
-                 AND a.statut_adhesion = 'ACTIF' 
-            THEN TRUE
-            ELSE FALSE
-        END AS a_mutuelle_active
-        
-    FROM patients p
-    LEFT JOIN adhesions a ON p.id_patient = a.id_patient
-    LEFT JOIN mutuelles m ON a.id_mut = m.id_mut
-)
-
-SELECT * FROM patient_mutuelle
-```
-
-**Avant (STAGING)** :
-```
--- stg_patient
-id_patient | nom    | prenom | age | ville
------------|--------|--------|-----|-------
-1          | DUPONT | Jean   | 44  | Paris
-
--- stg_adher
-id_patient | id_mut | statut_adhesion
------------|--------|----------------
-1          | 12     | ACTIF
-
--- stg_mutuelle
-id_mut | nom_mutuelle  | type_mutuelle
--------|---------------|---------------
-12     | Mutuelle AXA  | Mutuelle
-```
-
-**Après (ODS)** :
-```
-id_patient | nom    | prenom | age | ville | nom_mutuelle | type_mutuelle | a_mutuelle_active
------------|--------|--------|-----|-------|--------------|---------------|------------------
-1          | DUPONT | Jean   | 44  | Paris | Mutuelle AXA | Mutuelle      | TRUE
-```
-
----
-
-### 2️⃣ `ods_professionnel_complet` ⭐ (Agrégations + Enrichissement)
-
-**Sources** : `stg_professionnel_sante` + `stg_etablissement_professionnel` + `stg_specialites`
-
-#### Transformations
-
-```sql
-WITH professionnels AS (
-    SELECT * FROM {{ ref('stg_professionnel_sante') }}
-),
-
-etablissements_pro AS (
-    SELECT * FROM {{ ref('stg_etablissement_professionnel') }}
-),
-
-specialites AS (
-    SELECT * FROM {{ ref('stg_specialites') }}
-),
-
--- ✅ AGRÉGATION : Grouper par professionnel
-professionnel_avec_etablissement AS (
-    SELECT
-        p.*,
-        
-        -- ✅ AGRÉGATION : Informations établissement
-        MAX(ep.commune) AS commune_exercice,
-        MAX(ep.specialite) AS specialite_exercice_etab,
-        COUNT(DISTINCT ep.commune) AS nb_etablissements,
-        
-    FROM professionnels p
-    LEFT JOIN etablissements_pro ep ON p.identifiant = ep.identifiant
-    GROUP BY p.identifiant, p.civilite, p.nom, p.prenom, 
-             p.profession, p.categorie_professionnelle, 
-             p.code_specialite, p.loaded_at
-),
-
--- ✅ ENRICHISSEMENT : Ajouter infos spécialité
-professionnel_enrichi AS (
-    SELECT
-        p.*,
-        
-        -- ✅ JOINTURE : Informations spécialité détaillées
-        s.fonction AS specialite_fonction,
-        s.specialite AS specialite_libelle,
-        s.categorie AS specialite_categorie,
-        
-        -- ✅ RÈGLE MÉTIER : Mode d'exercice
-        CASE
-            WHEN p.categorie_professionnelle LIKE '%Libéral%' THEN 'Libéral'
-            WHEN p.categorie_professionnelle LIKE '%Salarié%' THEN 'Salarié'
-            WHEN p.categorie_professionnelle LIKE '%Mixte%' THEN 'Mixte'
-            ELSE 'Non renseigné'
-        END AS mode_exercice
-        
-    FROM professionnel_avec_etablissement p
-    LEFT JOIN specialites s ON p.code_specialite = s.code_specialite
-)
-
-SELECT * FROM professionnel_enrichi
-```
-
-**Avant (3 tables STAGING)** :
-```
--- stg_professionnel_sante
-identifiant | nom    | code_specialite
-------------|--------|----------------
-123456      | MARTIN | SM54
-
--- stg_etablissement_professionnel
-identifiant | commune | specialite
-------------|---------|------------
-123456      | Paris   | Cardiologue
-123456      | Lyon    | Cardiologue
-
--- stg_specialites
-code_specialite | fonction              | categorie
-----------------|-----------------------|--------------------
-SM54            | Médecin spécialiste   | Medecine specialisee
-```
-
-**Après (1 table ODS)** :
-```
-identifiant | nom    | commune_exercice | nb_etablissements | specialite_fonction | mode_exercice
-------------|--------|------------------|-------------------|---------------------|---------------
-123456      | MARTIN | Paris            | 2                 | Médecin spécialiste | Libéral
-```
-
----
-
-### 3️⃣ `ods_consultation_enrichie` ⭐ (Jointures Multiples + Classifications)
-
-**Sources** : `stg_consultation` + `ods_patient_complet` + `ods_professionnel_complet` + `stg_diagnostic`
-
-#### Transformations
-
-```sql
-WITH consultations AS (
-    SELECT * FROM {{ ref('stg_consultation') }}
-),
-
-patients AS (
-    SELECT * FROM {{ ref('ods_patient_complet') }}  -- Déjà enrichi !
-),
-
-professionnels AS (
-    SELECT * FROM {{ ref('ods_professionnel_complet') }}  -- Déjà enrichi !
-),
-
-diagnostics AS (
-    SELECT * FROM {{ ref('stg_diagnostic') }}
-),
-
-consultation_complete AS (
-    SELECT
-        -- ✅ Identifiants consultation
-        c.num_consultation,
-        c.date_consultation,
-        c.heure_debut,
-        c.heure_fin,
-        c.duree_consultation_minutes,
-        c.motif,
-        
-        -- ✅ Clés pour DWH
-        c.id_patient,
-        c.id_professionnel,
-        c.code_diagnostic,
-        c.id_mut,
-        
-        -- ✅ JOINTURE : Informations patient enrichies
-        p.nom AS patient_nom,
-        p.prenom AS patient_prenom,
-        p.sexe AS patient_sexe,
-        p.age AS patient_age,
-        p.tranche_age AS patient_tranche_age,
-        p.ville AS patient_ville,
-        p.nom_mutuelle AS patient_mutuelle,
-        p.a_mutuelle_active AS patient_a_mutuelle,
-        
-        -- ✅ JOINTURE : Informations professionnel
-        pr.nom AS professionnel_nom,
-        pr.prenom AS professionnel_prenom,
-        pr.profession AS professionnel_profession,
-        pr.code_specialite AS professionnel_code_specialite,
-        pr.mode_exercice AS professionnel_mode_exercice,
-        
-        -- ✅ JOINTURE : Informations diagnostic
-        d.libelle_diagnostic,
-        d.categorie_cim10,
-        
-        -- ✅ CLASSIFICATION MÉTIER : Catégorie patient
-        CASE
-            WHEN p.age < 18 THEN 'PEDIATRIE'
-            WHEN p.age > 65 THEN 'GERIATRIE'
-            ELSE 'ADULTE'
-        END AS categorie_patient,
-        
-        -- ✅ CLASSIFICATION MÉTIER : Durée consultation
-        CASE
-            WHEN c.duree_consultation_minutes < 15 THEN 'COURTE'
-            WHEN c.duree_consultation_minutes BETWEEN 15 AND 30 THEN 'NORMALE'
-            WHEN c.duree_consultation_minutes > 30 THEN 'LONGUE'
-            ELSE 'NON_RENSEIGNEE'
-        END AS duree_categorie,
-        
-        c.loaded_at
-        
-    FROM consultations c
-    INNER JOIN patients p ON c.id_patient = p.id_patient
-    LEFT JOIN professionnels pr ON c.id_professionnel = pr.identifiant
-    LEFT JOIN diagnostics d ON c.code_diagnostic = d.code_diagnostic
-)
-
-SELECT * FROM consultation_complete
-```
-
-**Avant (4 tables)** :
-```
--- stg_consultation
-num_consultation | id_patient | id_professionnel | duree_consultation_minutes
------------------|------------|------------------|---------------------------
-1001             | 1          | 123456           | 25
-
 -- ods_patient_complet
-id_patient | nom    | age | tranche_age | mutuelle
------------|--------|-----|-------------|----------
-1          | DUPONT | 44  | 31-50       | AXA
-
--- ods_professionnel_complet
-identifiant | nom    | profession       | mode_exercice
-------------|--------|------------------|---------------
-123456      | MARTIN | Médecin          | Libéral
-
--- stg_diagnostic
-code_diagnostic | libelle_diagnostic
-----------------|-------------------
-J06.9           | Infection respiratoire
-```
-
-**Après (1 table ODS enrichie)** :
-```
-num_consultation | patient_nom | patient_age | categorie_patient | professionnel_nom | mode_exercice | duree_categorie
------------------|-------------|-------------|-------------------|-------------------|---------------|----------------
-1001             | DUPONT      | 44          | ADULTE            | MARTIN            | Libéral       | NORMALE
-```
-
----
-
-### 4️⃣ `ods_hospitalisation_enrichie` (Calculs Métier)
-
-**Sources** : `stg_hospitalisation` + `ods_patient_complet` + `stg_diagnostic` + `stg_etablissement_sante`
-
-#### Transformations
-
-```sql
-SELECT
-    h.num_hospitalisation,
-    h.date_admission,
-    h.date_sortie,
-    h.jour_hospitalisation,  -- Calculé dans STAGING
-    
-    -- ✅ JOINTURES
-    p.nom AS patient_nom,
-    p.age AS patient_age,
-    e.nom_etablissement,
-    e.region AS region_etablissement,
-    d.libelle_diagnostic,
-    
-    -- ✅ CLASSIFICATION MÉTIER : Durée séjour
-    CASE
-        WHEN h.jour_hospitalisation < 3 THEN 'COURT_SEJOUR'
-        WHEN h.jour_hospitalisation BETWEEN 3 AND 7 THEN 'MOYEN_SEJOUR'
-        WHEN h.jour_hospitalisation > 7 THEN 'LONG_SEJOUR'
-        ELSE 'NON_RENSEIGNE'
-    END AS categorie_sejour,
-    
-    -- ✅ RÈGLE MÉTIER : Hospitalisation prolongée (> DMS)
-    CASE
-        WHEN h.jour_hospitalisation > 7 THEN TRUE
-        ELSE FALSE
-    END AS est_sejour_prolonge
-    
-FROM {{ ref('stg_hospitalisation') }} h
-LEFT JOIN {{ ref('ods_patient_complet') }} p ON h.id_patient = p.id_patient
-LEFT JOIN {{ ref('stg_etablissement_sante') }} e ON h.finess = e.finess_site
-LEFT JOIN {{ ref('stg_diagnostic') }} d ON h.code_diagnostic = d.code_diagnostic
-```
-
----
-
-### 5️⃣ `ods_localisation_consolidee` (Consolidation Multi-Sources)
-
-**Sources** : `stg_patient` + `stg_etablissement_sante` + `stg_deces`
-
-#### Transformations
-
-```sql
--- ✅ CONSOLIDATION : Toutes les localisations du système
-
--- Localisations depuis patients
-WITH loc_patients AS (
-    SELECT DISTINCT
-        code_postal,
-        ville,
-        'Patient' AS source_donnee
-    FROM {{ ref('stg_patient') }}
-    WHERE code_postal IS NOT NULL
-),
-
--- Localisations depuis établissements
-loc_etablissements AS (
-    SELECT DISTINCT
-        code_postal,
-        commune AS ville,
-        departement,
-        'Etablissement' AS source_donnee
-    FROM {{ ref('stg_etablissement_sante') }}
-    WHERE code_postal IS NOT NULL
-),
-
--- Localisations depuis décès
-loc_deces AS (
-    SELECT DISTINCT
-        code_postal_deces AS code_postal,
-        commune_deces AS ville,
-        departement_deces AS departement,
-        'Deces' AS source_donnee
-    FROM {{ ref('stg_deces') }}
-    WHERE code_postal_deces IS NOT NULL
-),
-
--- ✅ UNION : Consolider toutes les sources
-toutes_localisations AS (
-    SELECT * FROM loc_patients
-    UNION
-    SELECT * FROM loc_etablissements
-    UNION
-    SELECT * FROM loc_deces
-),
-
--- ✅ DÉDOUBLONNAGE + ENRICHISSEMENT
-localisation_unique AS (
-    SELECT
-        code_postal,
-        ville,
-        
-        -- ✅ CALCUL : Département
-        CASE
-            WHEN SUBSTRING(code_postal, 1, 2) = '20' THEN
-                CASE
-                    WHEN TRY_CAST(SUBSTRING(code_postal, 3, 1) AS INTEGER) < 2 
-                    THEN '2A'
-                    ELSE '2B'
-                END
-            ELSE SUBSTRING(code_postal, 1, 2)
-        END AS departement,
-        
-        -- ✅ ENRICHISSEMENT : Région
-        CASE
-            WHEN SUBSTRING(code_postal, 1, 2) IN ('75', '77', '78', '91', '92', '93', '94', '95') 
-            THEN 'Ile-de-France'
-            -- ... autres régions
-            ELSE 'Non renseigne'
-        END AS region,
-        
-        -- Garder la source (pour traçabilité)
-        MAX(source_donnee) AS source_donnee,
-        
-    FROM toutes_localisations
-    GROUP BY code_postal, ville
-)
-
-SELECT * FROM localisation_unique
-```
-
----
-
-## 📋 Transformations par Type
-
-### 🔗 Jointures (Principal Ajout dans ODS)
-
-```sql
--- Simple LEFT JOIN
-SELECT
+select
     p.*,
-    m.nom_mutuelle
-FROM {{ ref('stg_patient') }} p
-LEFT JOIN {{ ref('stg_mutuelle') }} m 
-    ON p.id_mut = m.id_mut
-
--- Multiple JOINs
-SELECT
-    c.*,
-    p.nom AS patient_nom,
-    pr.nom AS professionnel_nom,
-    d.libelle_diagnostic
-FROM {{ ref('stg_consultation') }} c
-INNER JOIN {{ ref('stg_patient') }} p ON c.id_patient = p.id_patient
-LEFT JOIN {{ ref('stg_professionnel_sante') }} pr ON c.id_professionnel = pr.identifiant
-LEFT JOIN {{ ref('stg_diagnostic') }} d ON c.code_diagnostic = d.code_diagnostic
+    
+    -- Enrichissement mutuelle via jointures
+    m.id_mut,
+    m.nom_mutuelle,
+    m.type_mutuelle,
+    a.statut_adhesion,
+    
+    -- Règle métier : mutuelle active
+    case
+        when m.id_mut is not null and a.statut_adhesion = 'ACTIF' then true
+        else false
+    end as a_mutuelle_active
+    
+from {{ ref('stg_patient') }} p
+left join {{ ref('stg_adher') }} a on p.id_patient = a.id_patient
+left join {{ ref('stg_mutuelle') }} m on a.id_mut = m.id_mut
 ```
 
-### 🎯 Règles Métier
-
+#### 👨‍⚕️ Professionnel avec Spécialité
 ```sql
--- Statut actif/inactif
-CASE
-    WHEN date_fin IS NULL OR date_fin > CURRENT_DATE 
-    THEN 'ACTIF'
-    ELSE 'INACTIF'
-END AS statut
-
--- Classification âge
-CASE
-    WHEN age < 18 THEN 'PEDIATRIE'
-    WHEN age > 65 THEN 'GERIATRIE'
-    ELSE 'ADULTE'
-END AS categorie_patient
-
--- Seuils métier
-CASE
-    WHEN valeur > seuil_critique THEN 'ALERTE'
-    WHEN valeur > seuil_moyen THEN 'ATTENTION'
-    ELSE 'NORMAL'
-END AS niveau_alerte
+-- ods_professionnel_complet
+select
+    ps.*,
+    
+    -- Enrichissement spécialité
+    s.nom_specialite,
+    s.code_specialite,
+    s.famille_specialite,
+    
+    -- Classification métier mode exercice
+    case
+        when ps.mode_exercice = 'L' then 'LIBERAL'
+        when ps.mode_exercice = 'S' then 'SALARIE'
+        when ps.mode_exercice = 'M' then 'MIXTE'
+        else 'NON_RENSEIGNE'
+    end as mode_exercice_libelle,
+    
+    -- Règles métier activité
+    case
+        when ps.date_fin_exercice is null then true
+        when ps.date_fin_exercice > current_date then true
+        else false
+    end as est_actif
+    
+from {{ ref('stg_professionnel_sante') }} ps
+left join {{ ref('stg_specialites') }} s 
+    on ps.code_specialite = s.code_specialite
 ```
 
-### 📊 Agrégations
+### 2. 📋 Consultation Enrichie Complète
 
+#### 🩺 Intégration Multi-Dimensionnelle
 ```sql
--- Compter
-COUNT(DISTINCT etablissement_id) AS nb_etablissements
-
--- Calculer moyenne
-AVG(duree_consultation) AS duree_moyenne
-
--- Prendre max/min
-MAX(date_modification) AS derniere_modification
-
--- Grouper
-SELECT
-    professionnel_id,
-    COUNT(*) AS nb_consultations,
-    AVG(duree) AS duree_moyenne
-FROM consultations
-GROUP BY professionnel_id
-```
-
-### 🏷️ Classifications Métier
-
-```sql
--- Classification simple
-CASE
-    WHEN condition1 THEN 'CATEGORIE_A'
-    WHEN condition2 THEN 'CATEGORIE_B'
-    ELSE 'CATEGORIE_C'
-END
-
--- Classification multiple critères
-CASE
-    WHEN age > 65 AND pathologie = 'cardiaque' THEN 'RISQUE_ELEVE'
-    WHEN age > 50 AND pathologie IN ('diabete', 'hypertension') THEN 'RISQUE_MOYEN'
-    ELSE 'RISQUE_FAIBLE'
-END AS niveau_risque
-```
-
-### 🔄 Dédoublonnage Avancé
-
-```sql
--- Garder la dernière version
-WITH ranked AS (
-    SELECT
-        *,
-        ROW_NUMBER() OVER (
-            PARTITION BY id_patient 
-            ORDER BY date_modification DESC
-        ) AS rn
-    FROM patients_historique
-)
-SELECT * FROM ranked WHERE rn = 1
-
--- Garder la meilleure qualité
-SELECT
-    id_patient,
-    MAX(CASE WHEN source = 'system_A' THEN nom END) AS nom,
-    MAX(CASE WHEN source = 'system_B' THEN email END) AS email
-FROM patients_multi_sources
-GROUP BY id_patient
-```
-
----
-
-## 📊 Résumé par Modèle ODS
-
-| Modèle ODS | Sources | Transformations Principales |
-|------------|---------|----------------------------|
-| `ods_patient_complet` | stg_patient + stg_adher + stg_mutuelle | ⭐ Jointures, Règle métier mutuelle active |
-| `ods_professionnel_complet` | stg_professionnel_sante + stg_etablissement_professionnel + stg_specialites | ⭐ Agrégation nb_établissements, Enrichissement spécialité |
-| `ods_consultation_enrichie` | stg_consultation + ods_patient + ods_professionnel + stg_diagnostic | ⭐ Jointures multiples, Classifications métier (pédiatrie/adulte/gériatrie) |
-| `ods_hospitalisation_enrichie` | stg_hospitalisation + ods_patient + stg_etablissement + stg_diagnostic | ⭐ Classification durée séjour, Règle séjour prolongé |
-| `ods_deces_enrichi` | stg_deces + ods_patient | ⭐ Matching fuzzy, Enrichissement patient |
-| `ods_localisation_consolidee` | stg_patient + stg_etablissement + stg_deces | ⭐ Consolidation multi-sources, Calcul région/département |
-| `ods_prescription_enrichie` | stg_prescription + stg_medicaments + stg_laboratoire | ⭐ Enrichissement médicament, Informations laboratoire |
-| `ods_satisfaction_unifie` | 31 tables satisfaction CSV | ⭐ UNION ALL multi-années, Normalisation scores |
-| `ods_qualite_soins_unifie` | Tables qualité/IPAQSS | ⭐ Consolidation indicateurs, Calculs ratios |
-
----
-
-## 📋 Checklist Qualité ODS
-
-### ✅ Chaque modèle doit avoir :
-
-- [ ] **Jointures logiques** avec bonnes clés
-- [ ] **Gestion des NULL** (LEFT vs INNER JOIN)
-- [ ] **Règles métier** documentées
-- [ ] **Pas de doublons** non voulus
-- [ ] **CTE claires** pour chaque source
-- [ ] **Nomenclature cohérente** (préfixes patient_, professionnel_)
-- [ ] **Tests configurés** (unicité, non-nullité)
-- [ ] **Performance** (éviter cross-joins)
-
----
-
-## 🚫 Anti-Patterns (À Éviter)
-
-### ❌ MAUVAIS : Créer dimensions dans ODS
-
-```sql
--- ❌ PAS BON ! Les sk_* c'est pour le DWH
-SELECT
-    ROW_NUMBER() OVER (ORDER BY id) AS sk_patient,  -- ← DWH !
-    id_patient,
-    nom
-FROM patients
-```
-
-**Correct** : Les clés substituts → **DWH** uniquement
-
-### ❌ MAUVAIS : Agrégations finales
-
-```sql
--- ❌ PAS BON ! Les agrégations finales c'est pour le DATAMART
-SELECT
-    region,
-    COUNT(*) AS nb_consultations_total,  -- ← DATAMART !
-    AVG(duree) AS duree_moyenne_region
-FROM consultations
-GROUP BY region
-```
-
-**Correct** : Agrégations finales → **DATAMART**
-
----
-
-## ✅ Exemple Modèle ODS Parfait
-
-```sql
--- ods_exemple.sql
-{{
-    config(
-        materialized='table',
-        tags=['ods', 'core', 'exemple']
-    )
-}}
-
--- 1. Importer les sources
-WITH source_a AS (
-    SELECT * FROM {{ ref('stg_table_a') }}
+-- ods_consultation_enrichie
+with consultations as (
+    select * from {{ ref('stg_consultation') }}
 ),
-
-source_b AS (
-    SELECT * FROM {{ ref('stg_table_b') }}
+patients as (
+    select * from {{ ref('ods_patient_complet') }}
 ),
-
-source_c AS (
-    SELECT * FROM {{ ref('stg_table_c') }}
+professionnels as (
+    select * from {{ ref('ods_professionnel_complet') }}
 ),
-
--- 2. Jointures et enrichissements
-enrichi AS (
-    SELECT
-        -- ✅ Clés business
-        a.id_element,
-        
-        -- ✅ Informations source A
-        a.nom,
-        a.date_creation,
-        
-        -- ✅ JOINTURE : Informations source B
-        b.categorie,
-        b.statut,
-        
-        -- ✅ JOINTURE : Informations source C
-        c.code_postal,
-        c.ville,
-        
-        -- ✅ RÈGLE MÉTIER : Calcul statut actif
-        CASE
-            WHEN b.date_fin IS NULL OR b.date_fin > CURRENT_DATE 
-            THEN TRUE
-            ELSE FALSE
-        END AS est_actif,
-        
-        -- ✅ CLASSIFICATION MÉTIER
-        CASE
-            WHEN a.valeur > 100 THEN 'HAUT'
-            WHEN a.valeur > 50 THEN 'MOYEN'
-            ELSE 'BAS'
-        END AS niveau,
-        
-        -- ✅ Métadonnées
-        a.loaded_at
-        
-    FROM source_a a
-    LEFT JOIN source_b b ON a.id_b = b.id_b
-    LEFT JOIN source_c c ON a.id_c = c.id_c
-    WHERE a.id_element IS NOT NULL
+diagnostics as (
+    select * from {{ ref('stg_diagnostic') }}
 )
 
--- 3. Retourner les données enrichies
-SELECT * FROM enrichi
-```
-
----
-
-## 🔄 Workflow STAGING → ODS
-
-```
-STAGING (tables nettoyées)
-    ↓
-    ├─ stg_patient ──┐
-    ├─ stg_mutuelle ─┼─→ ods_patient_complet (JOIN + règles métier)
-    └─ stg_adher ────┘
+select
+    -- Données consultation de base
+    c.num_consultation,
+    c.date_consultation,
+    c.heure_debut,
+    c.heure_fin,
+    c.duree_consultation_minutes,
+    c.motif,
     
-    ├─ stg_professionnel ──┐
-    ├─ stg_etablissement ──┼─→ ods_professionnel_complet (JOIN + agrégations)
-    └─ stg_specialites ────┘
+    -- Clés pour DWH
+    c.id_patient,
+    c.id_professionnel,
+    c.code_diagnostic,
+    c.id_mut,
     
-    ├─ stg_consultation ─┐
-    ├─ ods_patient ──────┼─→ ods_consultation_enrichie (JOIN multiples + classifications)
-    ├─ ods_professionnel ┤
-    └─ stg_diagnostic ───┘
+    -- Enrichissement patient
+    p.nom as patient_nom,
+    p.prenom as patient_prenom,
+    p.sexe as patient_sexe,
+    p.age as patient_age,
+    p.tranche_age as patient_tranche_age,
+    p.ville as patient_ville,
+    p.code_postal as patient_code_postal,
+    p.nom_mutuelle as patient_mutuelle,
+    p.a_mutuelle_active as patient_a_mutuelle,
+    
+    -- Enrichissement professionnel
+    pr.nom as professionnel_nom,
+    pr.prenom as professionnel_prenom,
+    pr.profession as professionnel_profession,
+    pr.nom_specialite as professionnel_specialite,
+    pr.mode_exercice_libelle as professionnel_mode_exercice,
+    
+    -- Enrichissement diagnostic
+    d.libelle_diagnostic,
+    d.categorie_cim10,
+    
+    -- Règles métier classification
+    case
+        when p.age < 18 then 'PEDIATRIE'
+        when p.age > 65 then 'GERIATRIE'
+        else 'ADULTE'
+    end as categorie_patient,
+    
+    case
+        when c.duree_consultation_minutes < 15 then 'COURTE'
+        when c.duree_consultation_minutes between 15 and 30 then 'NORMALE'
+        when c.duree_consultation_minutes > 30 then 'LONGUE'
+        else 'NON_RENSEIGNEE'
+    end as duree_categorie,
+    
+    -- Indicateurs qualité
+    case
+        when c.duree_consultation_minutes >= 20 
+         and d.categorie_cim10 in ('MALADIES_CHRONIQUES', 'SUIVIS_LOURDS')
+        then 'CONSULTATION_QUALITE'
+        else 'CONSULTATION_STANDARD'
+    end as niveau_qualite
+    
+from consultations c
+inner join patients p on c.id_patient = p.id_patient
+left join professionnels pr on c.id_professionnel = pr.identifiant
+left join diagnostics d on c.code_diagnostic = d.code_diagnostic
 ```
 
+### 3. 🗺️ Localisation Consolidée
+
+#### 📍 Référentiel Géographique Unifié
+```sql
+-- ods_localisation_consolidee
+with etablissements_geo as (
+    select distinct
+        code_postal,
+        commune,
+        departement,
+        region
+    from {{ ref('stg_etablissement_sante') }}
+    where code_postal is not null
+),
+
+deces_geo as (
+    select distinct
+        extract_code_postal(lieu_deces) as code_postal,
+        extract_commune(lieu_deces) as commune,
+        extract_departement(lieu_deces) as departement
+    from {{ ref('stg_deces') }}
+    where lieu_deces is not null
+),
+
+-- Consolidation avec règles de priorisation
+geo_unifie as (
+    select
+        coalesce(e.code_postal, d.code_postal) as code_postal,
+        coalesce(e.commune, d.commune) as commune,
+        coalesce(e.departement, d.departement) as departement,
+        e.region,
+        
+        -- Classification zone géographique
+        case
+            when substring(coalesce(e.departement, d.departement), 1, 2) in ('75', '92', '93', '94')
+                then 'ILE_DE_FRANCE'
+            when substring(coalesce(e.departement, d.departement), 1, 2) between '01' and '95'
+                then 'FRANCE_METROPOLITAINE'
+            when coalesce(e.departement, d.departement) in ('971', '972', '973', '974', '976')
+                then 'OUTRE_MER'
+            else 'INCONNU'
+        end as zone_geographique,
+        
+        -- Gestion spécifique Corse
+        case
+            when coalesce(e.departement, d.departement) in ('2A', '20A') then 'CORSE_DU_SUD'
+            when coalesce(e.departement, d.departement) in ('2B', '20B') then 'HAUTE_CORSE'
+            else null
+        end as sous_region_corse
+        
+    from etablissements_geo e
+    full outer join deces_geo d on e.code_postal = d.code_postal
+)
+
+select * from geo_unifie
+```
+
+### 4. 😊 Satisfaction Patients Unifiée
+
+#### 📊 Consolidation Multi-Sources E-SATIS
+```sql
+-- ods_satisfaction_unifie
+with esatis48h as (
+    select * from {{ ref('int_satisfaction_esatis48h') }}
+),
+esatisca as (
+    select * from {{ ref('int_satisfaction_esatisca') }}
+),
+
+satisfaction_consolidee as (
+    -- Union E-SATIS 48h et Chirurgie Ambulatoire
+    select
+        'E-SATIS_48H' as type_enquete,
+        finess,
+        annee,
+        
+        -- Scores normalisés (0-100)
+        score_global,
+        score_accueil,
+        score_prise_charge,
+        score_information,
+        score_chambre,
+        score_repas,
+        score_sortie,
+        null as score_parcours_patient,  -- Spécifique CA
+        
+        nb_reponses,
+        taux_participation
+        
+    from esatis48h
+    
+    union all
+    
+    select
+        'E-SATIS_CA' as type_enquete,
+        finess,
+        annee,
+        
+        -- Scores normalisés avec mapping CA → 48h
+        score_global,
+        score_accueil,
+        null as score_prise_charge,       -- Pas dans CA
+        score_information,
+        null as score_chambre,            -- Pas applicable CA
+        null as score_repas,              -- Pas applicable CA
+        score_sortie,
+        score_parcours_patient,           -- Spécifique CA
+        
+        nb_reponses,
+        taux_participation
+        
+    from esatisca
+),
+
+-- Agrégation par établissement/année avec pondération
+satisfaction_agregee as (
+    select
+        finess,
+        annee,
+        
+        -- Score global pondéré par nb réponses
+        sum(score_global * nb_reponses) / sum(nb_reponses) as score_global_pondere,
+        
+        -- Scores par dimension (moyenne pondérée)
+        sum(coalesce(score_accueil, 0) * nb_reponses) / sum(case when score_accueil is not null then nb_reponses else 0 end) as score_accueil_moyen,
+        sum(coalesce(score_information, 0) * nb_reponses) / sum(case when score_information is not null then nb_reponses else 0 end) as score_information_moyen,
+        
+        -- Métadonnées consolidées
+        sum(nb_reponses) as total_reponses,
+        count(distinct type_enquete) as nb_types_enquetes,
+        listagg(type_enquete, ', ') as types_enquetes_disponibles,
+        
+        -- Classification qualité établissement
+        case
+            when sum(score_global * nb_reponses) / sum(nb_reponses) >= 80 then 'EXCELLENCE'
+            when sum(score_global * nb_reponses) / sum(nb_reponses) >= 70 then 'TRES_SATISFAISANT'
+            when sum(score_global * nb_reponses) / sum(nb_reponses) >= 60 then 'SATISFAISANT'
+            when sum(score_global * nb_reponses) / sum(nb_reponses) >= 50 then 'A_AMELIORER'
+            else 'INSUFFISANT'
+        end as niveau_satisfaction
+        
+    from satisfaction_consolidee
+    group by finess, annee
+)
+
+select * from satisfaction_agregee
+```
+
+## 📊 Règles Métier Appliquées
+
+### 1. 🏥 Classification Patients
+
+#### 👶 Catégories d'Âge Médicales
+```sql
+case
+    when age < 18 then 'PEDIATRIE'
+    when age between 18 and 65 then 'ADULTE'
+    when age > 65 then 'GERIATRIE'
+    else 'NON_RENSEIGNE'
+end as categorie_medicale
+```
+
+#### 🎯 Tranches d'Âge Épidémiologiques
+```sql
+case
+    when age < 1 then 'NOURRISSON'
+    when age between 1 and 14 then 'ENFANT'
+    when age between 15 and 44 then 'ADULTE_JEUNE'
+    when age between 45 and 64 then 'ADULTE_MATUR'
+    when age between 65 and 84 then 'SENIOR'
+    else 'TRES_SENIOR'
+end as tranche_epidemiologique
+```
+
+### 2. ⏱️ Classification Temporelle
+
+#### 🩺 Durées Consultations
+```sql
+case
+    when duree_consultation_minutes < 15 then 'CONSULTATION_COURTE'
+    when duree_consultation_minutes between 15 and 30 then 'CONSULTATION_NORMALE'
+    when duree_consultation_minutes between 31 and 60 then 'CONSULTATION_LONGUE'
+    when duree_consultation_minutes > 60 then 'CONSULTATION_COMPLEXE'
+    else 'DUREE_INCONNUE'
+end as type_consultation
+```
+
+#### 🛏️ Durées Hospitalisation
+```sql
+case
+    when jour_hospitalisation = 0 then 'AMBULATOIRE'
+    when jour_hospitalisation = 1 then 'COURT_SEJOUR'
+    when jour_hospitalisation between 2 and 7 then 'SEJOUR_NORMAL'
+    when jour_hospitalisation between 8 and 21 then 'SEJOUR_LONG'
+    else 'SEJOUR_TRES_LONG'
+end as type_sejour
+```
+
+### 3. 🌍 Classification Géographique
+
+#### 📍 Zones de Couverture
+```sql
+case
+    when departement in ('75', '92', '93', '94') then 'PARIS_PETITE_COURONNE'
+    when departement in ('77', '78', '91', '95') then 'GRANDE_COURONNE'
+    when region = 'ILE_DE_FRANCE' then 'ILE_DE_FRANCE_AUTRE'
+    when departement between '01' and '95' then 'FRANCE_METROPOLITAINE'
+    when departement in ('971', '972', '973', '974', '976') then 'OUTRE_MER'
+    else 'ETRANGER_OU_INCONNU'
+end as zone_couverture
+```
+
+### 4. 💰 Classification Mutuelles
+
+#### 🏛️ Types d'Organismes
+```sql
+case
+    when type_mutuelle = 'MUTUELLE' then 'MUTUELLE_COMPLEMENTAIRE'
+    when type_mutuelle = 'ASSURANCE' then 'ASSURANCE_PRIVEE'
+    when type_mutuelle = 'PREVOYANCE' then 'INSTITUTION_PREVOYANCE'
+    when type_mutuelle = 'CMU' then 'COUVERTURE_UNIVERSELLE'
+    else 'AUTRE_ORGANISME'
+end as categorie_organisme
+```
+
+## ⚡ Optimisations ODS
+
+### 🚀 Configuration dbt ODS
+
+```yaml
+# dbt_project.yml
+models:
+  chu_datawarehouse:
+    ods:
+      +materialized: table        # Tables physiques pour performance
+      +tags: ['ods', 'core']      # Tags pour sélection et gouvernance
+      +indexes:
+        - columns: ['id_patient'] # Index sur clés métier
+          unique: false
+        - columns: ['date_consultation']
+          unique: false
+```
+
+### 📊 Métriques de Performance ODS
+
+| **Modèle ODS** | **Volume** | **Durée** | **Jointures** | **Optimisations** |
+|---------------|-----------|-----------|----------------|-------------------|
+| `ods_patient_complet` | 100K lignes | 2s | 2 LEFT JOIN | Index sur id_patient |
+| `ods_consultation_enrichie` | 1M lignes | 8s | 3 INNER/LEFT JOIN | Early filtering, index sur FK |
+| `ods_deces_enrichi` | 25M lignes | 12s | 1 LEFT JOIN | Partition par année |
+| `ods_satisfaction_unifie` | 5K lignes | 3s | UNION + GROUP BY | Agrégations optimisées |
+| **Total ODS** | **29M+ lignes** | **~20 secondes** | **Multi-tables** | **Jointures optimisées** |
+
+### 🔧 Optimisations Appliquées
+
+#### 1. **Jointure Performance**
+```sql
+-- Ordre optimisé: petite table en premier
+from {{ ref('stg_consultation') }} c           -- 1M lignes
+inner join {{ ref('ods_patient_complet') }} p  -- 100K lignes (plus petit)
+    on c.id_patient = p.id_patient
+left join {{ ref('ods_professionnel_complet') }} pr -- 1M lignes
+    on c.id_professionnel = pr.identifiant
+```
+
+#### 2. **Early Filtering**
+```sql
+-- Filtrer avant jointures coûteuses
+where c.date_consultation >= '2020-01-01'  -- Réduire volume
+  and c.duree_consultation_minutes > 0     -- Éliminer invalides
+  and p.age between 0 and 120              -- Cohérence âge
+```
+
+#### 3. **Conditional Aggregation**
+```sql
+-- Éviter GROUP BY multiples via agrégation conditionnelle
+sum(case when type_enquete = 'E-SATIS_48H' then nb_reponses else 0 end) as reponses_48h,
+sum(case when type_enquete = 'E-SATIS_CA' then nb_reponses else 0 end) as reponses_ca
+```
+
+## 🛡️ Qualité et Contrôles ODS
+
+### ✅ Tests dbt Automatiques
+
+```yaml
+# models/ods/schema.yml
+version: 2
+
+models:
+  - name: ods_patient_complet
+    description: "Patients enrichis avec informations mutuelle"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - id_patient
+    columns:
+      - name: id_patient
+        tests:
+          - not_null
+      - name: a_mutuelle_active
+        tests:
+          - accepted_values:
+              values: [true, false]
+              
+  - name: ods_consultation_enrichie
+    description: "Consultations avec contexte patient/professionnel/diagnostic"
+    tests:
+      - dbt_utils.row_count:
+          above: 900000  # Au moins 90% des consultations staging
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - num_consultation
+    columns:
+      - name: num_consultation
+        tests:
+          - not_null
+      - name: categorie_patient
+        tests:
+          - accepted_values:
+              values: ['PEDIATRIE', 'ADULTE', 'GERIATRIE']
+      - name: duree_categorie
+        tests:
+          - accepted_values:
+              values: ['COURTE', 'NORMALE', 'LONGUE', 'NON_RENSEIGNEE']
+```
+
+### 🔍 Contrôles Qualité Métier
+
+#### 1. **Intégrité Référentielle**
+```sql
+-- Test: Tous les patients des consultations ont une mutuelle (règle métier)
+select count(*) as consultations_sans_info_mutuelle
+from {{ ref('ods_consultation_enrichie') }}
+where patient_mutuelle is null and patient_a_mutuelle = true;
+-- Résultat attendu: 0
+```
+
+#### 2. **Cohérence Enrichissements**
+```sql
+-- Test: Cohérence classification âge patient
+select count(*) as classifications_incohérentes
+from {{ ref('ods_consultation_enrichie') }}
+where (patient_age < 18 and categorie_patient != 'PEDIATRIE')
+   or (patient_age > 65 and categorie_patient != 'GERIATRIE')
+   or (patient_age between 18 and 65 and categorie_patient != 'ADULTE');
+-- Résultat attendu: 0
+```
+
+#### 3. **Complétude Enrichissements**
+```sql
+-- Test: Taux d'enrichissement consultation
+select 
+    count(*) as total_consultations,
+    sum(case when professionnel_nom is not null then 1 else 0 end) * 100.0 / count(*) as pct_avec_professionnel,
+    sum(case when libelle_diagnostic is not null then 1 else 0 end) * 100.0 / count(*) as pct_avec_diagnostic,
+    sum(case when patient_mutuelle is not null then 1 else 0 end) * 100.0 / count(*) as pct_avec_mutuelle
+from {{ ref('ods_consultation_enrichie') }};
+-- Seuils attendus: >95% professionnel, >90% diagnostic, >80% mutuelle
+```
+
+## 🔗 Intégration Pipeline
+
+### ⬅️ Données Entrantes (STAGING)
+- **16 tables nettoyées** avec types cohérents
+- **35M+ lignes standardisées**
+- **Qualité validée** mais données isolées
+- **Pas de contexte métier**
+
+### ➡️ Données Sortantes (ODS)
+- **11 tables enrichies** avec jointures métier
+- **29M+ lignes intégrées** (réduction via filtrage)
+- **Règles métier appliquées**
+- **Contexte complet** pour analyse
+
+### 🚀 Commande Exécution
+
+```bash
+# Via dbt
+cd dbt && dbt run --select tag:ods
+
+# Via Airflow (automatisé)
+Task: dbt_ods
+Duration: ~20 secondes
+Dependencies: dbt_staging (nettoyage préalable)
+Next: dbt_dwh (modélisation dimensionnelle)
+```
+
+## 📋 Checklist Validation ODS
+
+### ✅ Contrôles Automatiques
+- [ ] **Volumes** : Réduction cohérente par rapport STAGING (filtrage qualité)
+- [ ] **Jointures** : Pas de produits cartésiens, taux jointure >90%
+- [ ] **Enrichissement** : Tous les enrichissements attendus présents
+- [ ] **Règles métier** : Classifications cohérentes et complètes
+- [ ] **Performance** : Exécution <30 secondes
+- [ ] **Tests dbt** : Tous les tests passent
+
+### 🔍 Contrôles Manuels
+- [ ] **Échantillonnage enrichi** : Vérifier enrichissements sur 50 lignes
+- [ ] **Cohérence jointures** : Validation logique des associations
+- [ ] **Règles métier** : Test manuel règles complexes
+- [ ] **Métriques business** : Validation avec experts métier
+
 ---
 
-## 🎯 Prochaine Étape : DWH
+**📋 Prochaine étape** : [Transformations ODS → DWH](TRANSFORMATIONS_ODS_TO_DWH.md)
 
-Une fois l'**ODS** validé, on passe au **DWH** (Data Warehouse) où on va :
+**🔙 Étape précédente** : [Transformations RAW → STAGING](TRANSFORMATIONS_RAW_TO_STAGING.md)
 
-✅ **Créer les dimensions** avec clés substituts (sk_*)  
-✅ **Créer les faits** avec métriques  
-✅ **Implémenter SCD Type 2** pour historisation  
-✅ **Architecture en étoile** (star schema)
-
-Voir `docs/TRANSFORMATIONS_ODS_TO_DWH.md`
-
----
-
-**Auteur** : Équipe Big Data Groupe 3  
-**Version** : 1.0  
-**Date** : 2025-10-21
-
+**🏠 Retour à l'index** : [Documentation Principale](INDEX_TRANSFORMATIONS.md)
