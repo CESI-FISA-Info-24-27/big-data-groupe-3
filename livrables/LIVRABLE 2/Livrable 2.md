@@ -446,15 +446,17 @@ Les optimisations se traduisent directement par une expérience utilisateur flui
 
 Le dashboard Consultations, qui exploite dm_consultations_analysis, affiche un temps de chargement initial inférieur à une seconde. Les interactions utilisateur comme le changement de filtres ou le drill-down d'une année vers un mois s'exécutent en moins de 50 millisecondes. Les trois KPI principaux du rapport (taux de consultation par établissement, par diagnostic, et par professionnel) répondent tous en moins de 80 millisecondes.
 
-
+![alt text](images/pbi/consultations.png)
 
 Le dashboard Hospitalisations présente des performances similaires avec un chargement initial sous la seconde et des KPI répondant en 40 à 60 millisecondes. La visualisation de la durée moyenne de séjour par établissement, qui nécessite un calcul d'agrégation, s'affiche en moins de 55 millisecondes grâce au pré-calcul dans la vue matérialisée.
 
-
+![alt text](images/pbi/hospitalisations.png)
 
 Les dashboards Décès et Satisfaction sont moins volumineux et offrent des performances encore meilleures avec des temps de réponse systématiquement inférieurs à 30 millisecondes.
 
+![alt text](images/pbi/deces.png)
 
+![alt text](images/pbi/satisfactions.png)
 
 Ces performances permettent au CHU d'explorer librement les données sans temps d'attente perceptible. L'actualisation nocturne des vues matérialisées garantit que les rapports reflètent toujours les données de la veille, avec une fraîcheur suffisante pour les besoins de pilotage stratégique.
 
