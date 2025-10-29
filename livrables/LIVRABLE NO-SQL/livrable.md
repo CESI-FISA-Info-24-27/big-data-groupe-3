@@ -109,7 +109,38 @@ Cette architecture modulaire présente plusieurs avantages majeurs :
 
 # 3. Choix techniques et justifications
 
-_(section identique à la précédente version, non modifiée ici pour concision)_
+## 3.1. DuckDB
+
+DuckDB a été retenu comme moteur analytique intermédiaire en raison de sa **légèreté**, de ses **performances élevées** et de son **intégration native** avec Python et les formats colonnes tels que Parquet. Il permet d’exécuter des requêtes SQL complexes directement sur des fichiers locaux sans nécessiter d’infrastructure serveur, ce qui réduit considérablement les coûts de maintenance.
+
+## 3.2. DBT (Data Build Tool)
+
+DBT structure les transformations en SQL de manière modulaire et versionnée. Il introduit une **logique de dépendance entre modèles**, une **documentation automatique** et des **tests de validation intégrés**. Cette approche garantit la qualité du code et la reproductibilité des transformations dans tous les environnements (développement, test, production).
+
+## 3.3. Apache Airflow
+
+Airflow constitue le cœur de l’orchestration. Il permet de planifier et de superviser les tâches, de gérer les dépendances et de relancer automatiquement les traitements en cas d’échec. Grâce à son interface web, les équipes peuvent suivre en temps réel l’état du pipeline et accéder aux logs d’exécution pour le diagnostic. L’approche “configuration as code” d’Airflow favorise le versionnement et la transparence.
+
+## 3.4. PostgreSQL
+
+PostgreSQL héberge le Data Warehouse et les datamarts. C’est un SGBD relationnel open-source reconnu pour sa robustesse et sa conformité ACID. Ses fonctionnalités avancées (partitionnement, indexation BRIN et B-tree, vues matérialisées) en font un choix idéal pour l’analytique décisionnelle. La gestion fine des privilèges et la journalisation des connexions renforcent la sécurité du système.
+
+## 3.5. Parquet
+
+Le format **Parquet** a été choisi pour le stockage intermédiaire des données en raison de ses excellentes performances d’accès et de compression. Son organisation en colonnes réduit significativement les temps de lecture et la taille des fichiers, tout en permettant la lecture sélective des colonnes pertinentes. Ce format s’intègre parfaitement dans les pipelines utilisant DuckDB et DBT.
+
+## 3.6. Power BI
+
+Power BI assure la visualisation et la restitution des données. Son intégration directe avec PostgreSQL permet d’exploiter les datamarts sans couches intermédiaires. Les vues matérialisées garantissent des **temps de réponse inférieurs à la seconde**, même sur des volumes importants. La mise en place du **Row-Level Security (RLS)** permet de restreindre dynamiquement les accès en fonction du profil utilisateur.
+
+## 3.7. Comparatif avec la stack Big Data classique
+
+Le cahier des charges initial proposait une architecture basée sur **Talend, Hadoop et Hive**. Après analyse, cette solution a été jugée surdimensionnée pour les besoins du CHU. Notre approche modernisée, fondée sur DuckDB, DBT et PostgreSQL, offre :
+
+- une **réduction drastique de la complexité opérationnelle** ;
+- des **performances équivalentes voire supérieures** sur les volumétries concernées ;
+- une **installation simplifiée** sans infrastructure distribuée ;
+- et un **coût d’exploitation nul**, grâce à l’utilisation exclusive d’outils open-source.
 
 ---
 
@@ -145,21 +176,27 @@ Cette organisation en couches successives garantit la **qualité**, la **traçab
 
 # 5. Guide d’installation et déploiement
 
-Cette section décrit un déploiement complet depuis zéro avec :
+Cette section décrit un **déploiement complet depuis zéro** comprenant :
 
-- Bases de données sous Docker (PostgreSQL source et DWH),
-- Traitements (ETL) et Airflow dans un environnement virtuel Python (venv),
-- Orchestration par admin_pipeline.py en 3 étapes.
+- **Bases de données sous Docker** (PostgreSQL source et DWH)
+- **Traitements (ETL) et Airflow dans un environnement virtuel Python (venv)**
+- **Orchestration par le script `admin_pipeline.py`** en trois étapes successives.
+
+---
 
 ## 5.1. Prérequis
 
-- OS : Linux/macOS/WSL2 recommandé.
-- Docker & Docker Compose ≥ 2.x
-- Python ≥ 3.11 + venv
-- Git ≥ 2.3
-- Ports libres : 5432 (Postgres source), 5433 (Postgres DWH), 8080 (Airflow web UI).
+Avant de procéder à l’installation, vérifier la présence des outils suivants :
 
-## 5.2. Clonage & structure de base
+- **OS** : Linux / macOS / WSL2 recommandé
+- **Docker & Docker Compose** ≥ 2.x
+- **Python** ≥ 3.11 avec le module `venv`
+- **Git** ≥ 2.3
+- Ports libres : `5432` (PostgreSQL source), `5433` (PostgreSQL DWH), `8080` (Airflow web UI)
+
+---
+
+## 5.2. Clonage et structure initiale
 
 ```bash
 git clone <votre_repo> chu-data
@@ -167,9 +204,11 @@ cd chu-data
 mkdir -p data/csv data/duckdb
 ```
 
+---
+
 ## 5.3. Configuration des variables d’environnement
 
-Créer un fichier .env à la racine du projet (exemple fourni) :
+Créer un fichier **`.env`** à la racine du projet :
 
 ```dotenv
 # Source Postgres (données CHU)
@@ -191,11 +230,13 @@ DUCKDB_PATH=data/duckdb/staging.duckdb
 CSV_PATH=data/csv
 ```
 
-Conseil : utilisez un gestionnaire comme direnv ou python-dotenv pour charger automatiquement le .env.
+> 💡 Conseil : utiliser **`python-dotenv`** ou **`direnv`** pour charger automatiquement le fichier `.env`.
+
+---
 
 ## 5.4. Démarrage des bases de données (Docker)
 
-Créer un docker-compose.yml minimal avec deux instances PostgreSQL :
+Créer un fichier **`docker-compose.yml`** pour lancer les deux instances PostgreSQL :
 
 ```yaml
 services:
@@ -206,7 +247,8 @@ services:
       POSTGRES_DB: ${SOURCE_POSTGRES_DB}
       POSTGRES_USER: ${SOURCE_POSTGRES_USER}
       POSTGRES_PASSWORD: ${SOURCE_POSTGRES_PASSWORD}
-    ports: ["${SOURCE_POSTGRES_PORT}:5432"]
+    ports:
+      - "${SOURCE_POSTGRES_PORT}:5432"
     volumes:
       - pg_source_data:/var/lib/postgresql/data
 
@@ -217,7 +259,8 @@ services:
       POSTGRES_DB: ${DWH_POSTGRES_DB}
       POSTGRES_USER: ${DWH_POSTGRES_USER}
       POSTGRES_PASSWORD: ${DWH_POSTGRES_PASSWORD}
-    ports: ["${DWH_POSTGRES_PORT}:5432"]
+    ports:
+      - "${DWH_POSTGRES_PORT}:5432"
     volumes:
       - pg_dwh_data:/var/lib/postgresql/data
 
@@ -226,115 +269,153 @@ volumes:
   pg_dwh_data:
 ```
 
-Lancer :
+Démarrer les conteneurs :
 
 ```bash
 docker compose up -d
 ```
 
-Vérifier :
+Vérifier la connexion :
 
 ```bash
-# Exemple : se connecter au DWH et afficher la version
-PGPASSWORD=$DWH_POSTGRES_PASSWORD psql -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB -c "select version();"
+PGPASSWORD=$DWH_POSTGRES_PASSWORD psql \
+  -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT \
+  -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB \
+  -c "SELECT version();"
 ```
 
-## 5.5. Environnement Python (venv) et dépendances
+---
 
-Créer l’environnement et installer les dépendances (Airflow inclus) :
+## 5.5. Installation de l’environnement Python (venv)
+
+Créer l’environnement virtuel et installer les dépendances :
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 
-# Dépendances typiques du projet
+# Dépendances principales
 pip install apache-airflow==2.10.* duckdb dbt-core dbt-postgres pandas pyarrow psycopg[binary] python-dotenv
 ```
 
-Si vous utilisez un fichier requirements.txt :
+> Si un fichier `requirements.txt` est présent :
+>
+> ```bash
+> pip install -r requirements.txt
+> ```
+
+---
+
+## 5.6. Initialisation des schémas (optionnel)
+
+Les scripts d’initialisation SQL se trouvent dans `scripts/init/` :
+
+- `create_users_db.sql` : création des rôles et utilisateurs PostgreSQL
+- `init_staging.sql`, `init_ods.sql`, `init_dwh.sql`, `init_datamart.sql` : création des schémas et tables
+- `create_dwh.sql` : définition structurelle du DWH
+
+Pour exécuter manuellement :
 
 ```bash
-pip install -r requirements.txt
+PGPASSWORD=$DWH_POSTGRES_PASSWORD psql \
+  -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT \
+  -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB \
+  -f scripts/init/init_dwh.sql
 ```
 
-## 5.6. Initialisation des schémas (optionnel si automatisé)
-
-Les scripts SQL (optionnels si l’orchestration est confiée à admin_pipeline.py) se trouvent dans scripts/init/ :
-
-- create_users_db.sql – rôles et utilisateurs,
-- init_staging.sql, init_ods.sql, init_dwh.sql, init_datamart.sql – schémas et tables,
-- create_dwh.sql – structure logique du DWH.
-  Exécution manuelle (exemple) :
-
-```bash
-PGPASSWORD=$DWH_POSTGRES_PASSWORD psql -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB -f scripts/init/init_dwh.sql
-```
+---
 
 ## 5.7. Orchestration et exécution du pipeline
 
-Le script central scripts/admin_pipeline.py orchestre l’ensemble du flux. Il se déroule en 3 étapes :
+Le script **`admin_pipeline.py`** est le point d’entrée unique du pipeline.
+Il enchaîne automatiquement les trois étapes suivantes :
 
-1. Chargement des données sources (CSV et PostgreSQL) vers STAGING
-   (internement, appels à load_csv_to_staging.py, load_postgres_to_staging.py ou load_all_to_staging.py).
-2. Transformation (DBT et DuckDB) vers ODS/DWH
-   (exécution des modèles dbt : staging/, ods/, marts/dwh/).
-3. Publication vers PostgreSQL (DWH et DATAMART)
-   (export via export_dwh_to_postgres.py ou push_dwh_to_postgres.py, puis build_datamart_via_postgres.py).
+1. **Chargement des données sources → STAGING**
+   Appelle les scripts `load_csv_to_staging.py`, `load_postgres_to_staging.py` ou `load_all_to_staging.py`.
+2. **Transformation → ODS / DWH**
+   Exécute les modèles **DBT** (`staging/`, `ods/`, `marts/dwh/`) à l’aide de DuckDB.
+3. **Publication → DWH / DATAMART**
+   Transfère les données dans PostgreSQL via `export_dwh_to_postgres.py` et `build_datamart_via_postgres.py`.
 
 Exécution type :
 
 ```bash
 source .venv/bin/activate
 python scripts/admin_pipeline.py
-# Suivre le menu interactif, ou passer des options si prévues (--step 1, 2, 3)
 ```
 
-Alternative manuelle (débogage) :
+> Pour un lancement manuel :
+>
+> ```bash
+> python scripts/load_all_to_staging.py
+> dbt run && dbt test
+> python scripts/export_dwh_to_postgres.py
+> ```
 
-```bash
-python scripts/load_all_to_staging.py
-# puis transformations : dbt run ; tests : dbt test
-# puis export/push vers PostgreSQL
-```
+---
 
-## 5.8. Configuration et lancement d’Airflow (dans le venv)
+## 5.8. Configuration et lancement d’Airflow
 
-Initialiser Airflow (exécuté depuis le venv) :
+Airflow est installé dans le venv Python.
+Initialiser la base de métadonnées et créer l’utilisateur administrateur :
 
 ```bash
 export AIRFLOW_HOME=$(pwd)/.airflow
 airflow db init
-airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin
+airflow users create \
+  --username admin \
+  --firstname Admin \
+  --lastname User \
+  --role Admin \
+  --email admin@example.com \
+  --password admin
 ```
 
-Placez votre DAG (par exemple dags/daily_etl.py) qui appelle admin_pipeline.py (Étapes 1→3). Lancer webserver et scheduler :
+Déposer le fichier **`dags/daily_etl.py`**, qui appelle `admin_pipeline.py`.
+Lancer les services Airflow :
 
 ```bash
 airflow webserver -p 8080 &
 airflow scheduler &
 ```
 
-Accéder à l’UI : [http://localhost:8080](http://localhost:8080) puis déclencher le DAG daily_etl.
+Interface disponible sur **[http://localhost:8080](http://localhost:8080)** → déclencher le DAG `daily_etl`.
+
+---
 
 ## 5.9. Vérifications fonctionnelles
 
-- DBT : exécuter dbt run puis dbt test (vérifier l’absence d’erreurs dans dbt/target/).
-- PostgreSQL (DWH) : vérifier la présence des tables via une requête :
+- **DBT :**
 
-```sql
-SELECT schemaname, tablename FROM pg_tables WHERE schemaname IN ('dwh','datamart') ORDER BY 1,2;
-```
+  ```bash
+  dbt run && dbt test
+  ```
 
-- Datamarts : valider que les vues matérialisées (ex. dm_consultations_analysis) sont alimentées et requêtables.
-- Power BI : tester la connexion directe au schéma datamart.
+- **PostgreSQL :**
+
+  ```bash
+  PGPASSWORD=$DWH_POSTGRES_PASSWORD psql \
+  -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT \
+  -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB \
+  -c "\\dt dwh.*"
+  ```
+
+- **Datamarts :** vérifier la présence des vues (`dm_consultations_analysis`, etc.)
+- **Power BI :** connecter directement le schéma `datamart` pour valider la lecture.
+
+---
 
 ## 5.10. Dépannage
 
-- Ports déjà utilisés : modifier SOURCE_POSTGRES_PORT et DWH_POSTGRES_PORT dans .env et docker-compose.yml, puis relancer docker compose up -d.
-- Variables non chargées : exécuter export $(grep -v '^#' .env | xargs) avant les scripts.
-- Paquets Python : vérifier l’activation du venv, puis pip install -r requirements.txt.
-- Accès Postgres : tester psql avec les paramètres .env et vérifier les logs Docker (docker logs pg_dwh).
-- Airflow : si l’UI ne démarre pas, purger la méta-base avec airflow db reset (supprime l’historique), puis relancer.
+| Problème | Cause probable | Solution |
+| --- | --- | --- |
+| Port déjà utilisé | Un autre service PostgreSQL tourne | Modifier les ports dans `.env` puis relancer : `docker compose up -d` |
+| Variables non chargées | Le fichier `.env` n’est pas exporté | Exporter les variables : `export $(grep -v '^\s*#' .env | xargs)` ou utiliser `python-dotenv` / `direnv` |
+| Airflow ne démarre pas | Conflit ou base de métadonnées corrompue | Réinitialiser la base Airflow : `airflow db reset --yes` puis `airflow db init` ; vérifier les logs |
+| Échec de connexion DWH | Mauvais identifiants ou conteneur arrêté | Vérifier `.env`, relancer le conteneur et consulter les logs : `docker logs pg_dwh` |
+| Modules Python manquants | Dépendances non installées dans le venv | Activer le venv et installer : `source .venv/bin/activate && pip install -r requirements.txt` |
+| Tables / datamarts absents | Scripts d'initialisation non exécutés | Lancer les scripts d'init : `psql -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB -f scripts/init/init_dwh.sql` |
 
-À ce stade, l’environnement est opérationnel : le pipeline peut être exécuté à la demande via admin_pipeline.py ou planifié quotidiennement dans Airflow.
+✅ **À ce stade, l’environnement est opérationnel.**
+Le pipeline peut être exécuté **à la demande via `admin_pipeline.py`** ou **planifié automatiquement par Airflow**.
