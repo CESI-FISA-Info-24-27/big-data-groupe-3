@@ -224,11 +224,11 @@ Arborescence principale déjà fournie :
 
 ## 5.3. Variables d’environnement
 
-Créer un fichier **`.env`** à la racine (ou dupliquer/compléter `./.env.example`) :
+Créer un fichier **`.env`** à la racine :
 
 ```dotenv
 # Source Postgres (optionnelle)
-SOURCE_POSTGRES_HOST=host.docker.internal
+SOURCE_POSTGRES_HOST=localhost
 SOURCE_POSTGRES_PORT=5432
 SOURCE_POSTGRES_DB=chu_source
 SOURCE_POSTGRES_USER=chu_user
@@ -245,8 +245,6 @@ DWH_POSTGRES_PASSWORD=admin
 DUCKDB_PATH=data/duckdb/staging.duckdb
 CSV_PATH=data/csv
 ```
-
-> 💡 Astuce : chargez automatiquement ces variables avec **`python-dotenv`** (le script `admin_pipeline.py` l’utilise) ou `direnv`.
 
 ---
 
@@ -334,18 +332,6 @@ Exécution automatique des étapes **1–3** :
 ```bash
 python scripts/admin_pipeline.py --step 1,2,3
 ```
-
-> **Variante « Datamart direct PostgreSQL (recommandée pour gros volumes)** :
->
-> * Modifiez l’étape 2 pour ne construire **que** `staging` + `ods` + `marts/dwh` :
->   `cd dbt && dbt run --select staging ods marts.dwh`
-> * Exécutez l’étape 3 avec **export du DWH uniquement** (deux options) :
->
->   1. **Utiliser** `python scripts/export_dwh_to_postgres.py` (schéma cible à ajuster si besoin), ou
->   2. **Éditer** `TABLES_ORDRE` dans `push_dwh_to_postgres.py` et **commenter les lignes `dm_*`** pour ne pousser que `dwh.*`.
-> * Puis lancez **l’étape 4 (optionnelle)** pour créer le datamart directement dans PostgreSQL :
->   `python scripts/build_datamart_via_postgres.py`
->   (vous pouvez ensuite exécuter `python scripts/fix_datamart_schema.py` pour harmoniser certains types de colonnes si nécessaire).
 
 ---
 
