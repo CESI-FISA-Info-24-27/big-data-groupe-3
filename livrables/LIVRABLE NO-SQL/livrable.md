@@ -1,17 +1,22 @@
 # 1. Introduction et objectifs
 
-Le projet de valorisation des données médicales du groupe CHU s’inscrit dans une démarche de modernisation de la gouvernance de l’information. Les établissements de santé produisent quotidiennement une grande quantité de données issues de systèmes variés (dossiers patients, bases administratives, fichiers d’enquêtes, etc.), dont l’exploitation demeure souvent fragmentée. L’objectif de ce projet est de centraliser, structurer et rendre exploitables ces données à travers un entrepôt décisionnel moderne, performant et évolutif.
+Le secteur de la santé vit aujourd’hui une transformation numérique sans précédent. Chaque jour, les hôpitaux produisent des quantités considérables de données médicales et administratives : dossiers patients, résultats d’examens, suivis d’hospitalisation, enquêtes de satisfaction, statistiques internes… Ces informations représentent une véritable richesse, mais restent souvent dispersées dans différents systèmes, rendant leur exploitation difficile.
 
-Ce livrable a pour vocation de documenter l’ensemble des choix techniques mis en œuvre dans le cadre du projet. Il constitue la référence technique pour toute équipe souhaitant reprendre, déployer ou faire évoluer la solution. La documentation décrit en détail :
+Face à ce constat, le groupe CHU a souhaité mettre en place un entrepôt de données moderne et évolutif capable de centraliser, structurer et valoriser ces informations. L’objectif est simple : offrir aux équipes médicales et aux responsables d’établissement une vision claire et fiable de leur activité pour appuyer la prise de décision et améliorer la qualité des soins.
 
-- l’architecture technique du système, organisée en cinq couches logiques ;
-- les outils et technologies sélectionnés, accompagnés d’une justification argumentée ;
-- la structuration des zones de données et le fonctionnement du pipeline ELT ;
-- les scripts Python et DBT utilisés à chaque étape du processus de traitement.
+Ce livrable détaille l’ensemble des choix techniques réalisés pour concevoir cette solution :
 
-Cette approche vise à garantir la **transparence**, la **maintenabilité** et la **pérennité** de la solution développée. En s’appuyant sur des outils open-source et des standards industriels éprouvés, l’architecture proposée répond aux exigences de performance, de sécurité et de conformité réglementaire (notamment RGPD) imposées dans le domaine médical.
+- une architecture en cinq couches logiques ;
 
-En résumé, ce livrable technique doit permettre à toute équipe d’ingénieurs de comprendre le fonctionnement complet du système d’information décisionnel du CHU, de le déployer rapidement dans un nouvel environnement et d’en assurer la continuité opérationnelle dans le temps.
+- les technologies sélectionnées et leurs justifications ;
+
+- la structure des différentes zones de données et le fonctionnement du pipeline ELT ;
+
+- les scripts Python et DBT utilisés à chaque étape du traitement.
+
+Plus qu’une simple documentation, ce livrable constitue un guide technique complet, destiné à toute équipe amenée à déployer, maintenir ou faire évoluer la solution. Il met l’accent sur la clarté, la reproductibilité et la pérennité du système.
+
+En s’appuyant sur des outils open-source et des standards reconnus, cette architecture répond aux exigences du domaine médical : performance, sécurité, conformité réglementaire et respect du RGPD.
 
 ---
 
@@ -176,130 +181,112 @@ Cette organisation en couches successives garantit la **qualité**, la **traçab
 
 # 5. Guide d’installation et déploiement
 
-Cette section décrit un **déploiement complet depuis zéro** comprenant :
-
-- **Bases de données sous Docker** (PostgreSQL source et DWH)
-- **Traitements (ETL) et Airflow dans un environnement virtuel Python (venv)**
-- **Orchestration par le script `admin_pipeline.py`** en trois étapes successives.
+Cette section décrit la procédure pour **déployer le projet depuis zéro** en s’appuyant sur le `docker-compose.yml` fourni (PostgreSQL DWH + base Airflow + Airflow webserver/scheduler). Les **traitements ETL** (DuckDB + DBT + scripts Python) s’exécutent dans un **environnement virtuel Python (venv)** sur la machine hôte.
 
 ---
 
 ## 5.1. Prérequis
 
-Avant de procéder à l’installation, vérifier la présence des outils suivants :
-
-- **OS** : Linux / macOS / WSL2 recommandé
-- **Docker & Docker Compose** ≥ 2.x
-- **Python** ≥ 3.11 avec le module `venv`
-- **Git** ≥ 2.3
-- Ports libres : `5432` (PostgreSQL source), `5433` (PostgreSQL DWH), `8080` (Airflow web UI)
+* **OS** : Linux / macOS / WSL2 recommandé
+* **Docker & Docker Compose** ≥ 2.x
+* **Python** ≥ 3.11 avec `venv`
+* **Git** ≥ 2.3
+* Ports libres : **5433** (PostgreSQL DWH), **5434** (PostgreSQL Airflow), **8080** (Airflow UI)
 
 ---
 
-## 5.2. Clonage et structure initiale
+## 5.2. Clonage du dépôt & création des répertoires
 
 ```bash
-git clone <votre_repo> chu-data
-cd chu-data
+# HTTPS (recommandé)
+git clone https://github.com/CESI-FISA-Info-24-27/big-data-groupe-3.git
+# ou en SSH
+# git@github.com:24-27/big-data-groupe-3.git
+
+cd big-data-groupe-3
+# (optionnel) se placer sur la branche de travail
+# git checkout labo
+
+# Dossiers de données locaux
 mkdir -p data/csv data/duckdb
 ```
 
+Arborescence principale déjà fournie :
+
+* `dags/` : DAGs Airflow pour l’orchestration
+* `dbt/` : modèles et tests DBT (staging, ods, dwh, datamart)
+* `scripts/` : scripts Python d’ingestion/transfert/administration
+* `scripts/init/` : SQL d’initialisation des schémas (exécutés au démarrage du DWH)
+* `docs/`, `livrables/` : documentation
+* `docker-compose.yml` : stack Docker (PostgreSQL + Airflow)
+
 ---
 
-## 5.3. Configuration des variables d’environnement
+## 5.3. Variables d’environnement
 
-Créer un fichier **`.env`** à la racine du projet :
+Créer un fichier **`.env`** à la racine (ou dupliquer/compléter `./.env.example`) :
 
 ```dotenv
-# Source Postgres (données CHU)
-SOURCE_POSTGRES_HOST=localhost
+# Source Postgres (optionnelle)
+SOURCE_POSTGRES_HOST=host.docker.internal
 SOURCE_POSTGRES_PORT=5432
 SOURCE_POSTGRES_DB=chu_source
 SOURCE_POSTGRES_USER=chu_user
 SOURCE_POSTGRES_PASSWORD=changeme
 
-# DWH Postgres
-DWH_POSTGRES_HOST=localhost
-DWH_POSTGRES_PORT=5433
-DWH_POSTGRES_DB=chu_dwh
-DWH_POSTGRES_USER=dwh_user
-DWH_POSTGRES_PASSWORD=changeme
+# DWH Postgres (dans Docker)
+DWH_POSTGRES_HOST=postgres-dwh
+DWH_POSTGRES_PORT=5432
+DWH_POSTGRES_DB=healthcare_dwh
+DWH_POSTGRES_USER=admin
+DWH_POSTGRES_PASSWORD=admin
 
-# Paths
+# Chemins locaux
 DUCKDB_PATH=data/duckdb/staging.duckdb
 CSV_PATH=data/csv
 ```
 
-> 💡 Conseil : utiliser **`python-dotenv`** ou **`direnv`** pour charger automatiquement le fichier `.env`.
+> 💡 Astuce : chargez automatiquement ces variables avec **`python-dotenv`** (le script `admin_pipeline.py` l’utilise) ou `direnv`.
 
 ---
 
-## 5.4. Démarrage des bases de données (Docker)
+## 5.4. Démarrage de l’infrastructure Docker
 
-Créer un fichier **`docker-compose.yml`** pour lancer les deux instances PostgreSQL :
+Le `docker-compose.yml` lance :
 
-```yaml
-services:
-  pg_source:
-    image: postgres:16
-    container_name: pg_source
-    environment:
-      POSTGRES_DB: ${SOURCE_POSTGRES_DB}
-      POSTGRES_USER: ${SOURCE_POSTGRES_USER}
-      POSTGRES_PASSWORD: ${SOURCE_POSTGRES_PASSWORD}
-    ports:
-      - "${SOURCE_POSTGRES_PORT}:5432"
-    volumes:
-      - pg_source_data:/var/lib/postgresql/data
-
-  pg_dwh:
-    image: postgres:16
-    container_name: pg_dwh
-    environment:
-      POSTGRES_DB: ${DWH_POSTGRES_DB}
-      POSTGRES_USER: ${DWH_POSTGRES_USER}
-      POSTGRES_PASSWORD: ${DWH_POSTGRES_PASSWORD}
-    ports:
-      - "${DWH_POSTGRES_PORT}:5432"
-    volumes:
-      - pg_dwh_data:/var/lib/postgresql/data
-
-volumes:
-  pg_source_data:
-  pg_dwh_data:
-```
-
-Démarrer les conteneurs :
+* **postgres-dwh** (PostgreSQL 15) exposé sur **localhost:5433**
+* **postgres-airflow** (PostgreSQL 15) exposé sur **localhost:5434**
+* **airflow-webserver** (port **8080**) et **airflow-scheduler**
+* **airflow-init** (initialisation automatique)
 
 ```bash
 docker compose up -d
 ```
 
-Vérifier la connexion :
+Accès à l’UI Airflow : **[http://localhost:8080](http://localhost:8080)** (utilisateur : `admin`, mot de passe : `admin`).
+
+Vérification du DWH :
 
 ```bash
-PGPASSWORD=$DWH_POSTGRES_PASSWORD psql \
-  -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT \
-  -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB \
-  -c "SELECT version();"
+PGPASSWORD=admin psql -h localhost -p 5433 -U admin -d healthcare_dwh -c "SELECT version();"
 ```
 
 ---
 
-## 5.5. Installation de l’environnement Python (venv)
+## 5.5. Environnement Python (ETL local)
 
-Créer l’environnement virtuel et installer les dépendances :
+Créer le venv et installer les dépendances ETL :
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 
-# Dépendances principales
-pip install apache-airflow==2.10.* duckdb dbt-core dbt-postgres pandas pyarrow psycopg[binary] python-dotenv
+# Dépendances principales (alignées avec les scripts fournis)
+pip install duckdb dbt-core dbt-duckdb pandas pyarrow psycopg2-binary python-dotenv
 ```
 
-> Si un fichier `requirements.txt` est présent :
+> Si vous préférez, utilisez le fichier `requirements.txt` :
 >
 > ```bash
 > pip install -r requirements.txt
@@ -307,115 +294,101 @@ pip install apache-airflow==2.10.* duckdb dbt-core dbt-postgres pandas pyarrow p
 
 ---
 
-## 5.6. Initialisation des schémas (optionnel)
+## 5.6. Initialisation automatique des schémas DWH
 
-Les scripts d’initialisation SQL se trouvent dans `scripts/init/` :
+Au premier démarrage, Docker charge les SQL de `scripts/init/` via le volume `./scripts/init:/docker-entrypoint-initdb.d` et crée :
 
-- `create_users_db.sql` : création des rôles et utilisateurs PostgreSQL
-- `init_staging.sql`, `init_ods.sql`, `init_dwh.sql`, `init_datamart.sql` : création des schémas et tables
-- `create_dwh.sql` : définition structurelle du DWH
+* `create_users_db.sql` (rôles & utilisateurs),
+* `init_staging.sql`, `init_ods.sql`, `init_dwh.sql`, `init_datamart.sql` (schémas & tables).
 
-Pour exécuter manuellement :
+Relance manuelle possible :
 
 ```bash
-PGPASSWORD=$DWH_POSTGRES_PASSWORD psql \
-  -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT \
-  -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB \
-  -f scripts/init/init_dwh.sql
+docker exec -it chu-dwh \
+  psql -U admin -d healthcare_dwh \
+  -f /docker-entrypoint-initdb.d/init_dwh.sql
 ```
 
 ---
 
-## 5.7. Orchestration et exécution du pipeline
+## 5.7. Lancer le pipeline avec `admin_pipeline.py`
 
-Le script **`admin_pipeline.py`** est le point d’entrée unique du pipeline.
-Il enchaîne automatiquement les trois étapes suivantes :
+`scripts/admin_pipeline.py` orchestre les **3 étapes cibles** (mode recommandé) :
 
-1. **Chargement des données sources → STAGING**
-   Appelle les scripts `load_csv_to_staging.py`, `load_postgres_to_staging.py` ou `load_all_to_staging.py`.
-2. **Transformation → ODS / DWH**
-   Exécute les modèles **DBT** (`staging/`, `ods/`, `marts/dwh/`) à l’aide de DuckDB.
-3. **Publication → DWH / DATAMART**
-   Transfère les données dans PostgreSQL via `export_dwh_to_postgres.py` et `build_datamart_via_postgres.py`.
+1. **Chargement → STAGING (DuckDB)**
+   Exécute `load_csv_to_staging.py` + `load_postgres_to_staging.py` (ou `load_all_to_staging.py`).
+2. **Transformations → ODS & DWH (DuckDB via DBT)**
+   Par défaut, la commande intégrée est `dbt run` **qui construit tous les modèles** (`staging/`, `ods/`, `dwh/` et `marts/datamart/`).
+3. **Publication → PostgreSQL (DWH **+ datamarts**) **
+   Exécute `push_dwh_to_postgres.py` (mode **batch** avec `COPY`) et pousse les tables `dwh.*` **et** les `dm_*` si elles existent dans DuckDB.
 
-Exécution type :
+Exécution standard (interactive) :
 
 ```bash
 source .venv/bin/activate
 python scripts/admin_pipeline.py
 ```
 
-> Pour un lancement manuel :
+Exécution automatique des étapes **1–3** :
+
+```bash
+python scripts/admin_pipeline.py --step 1,2,3
+```
+
+> **Variante « Datamart direct PostgreSQL (recommandée pour gros volumes)** :
 >
-> ```bash
-> python scripts/load_all_to_staging.py
-> dbt run && dbt test
-> python scripts/export_dwh_to_postgres.py
-> ```
+> * Modifiez l’étape 2 pour ne construire **que** `staging` + `ods` + `marts/dwh` :
+>   `cd dbt && dbt run --select staging ods marts.dwh`
+> * Exécutez l’étape 3 avec **export du DWH uniquement** (deux options) :
+>
+>   1. **Utiliser** `python scripts/export_dwh_to_postgres.py` (schéma cible à ajuster si besoin), ou
+>   2. **Éditer** `TABLES_ORDRE` dans `push_dwh_to_postgres.py` et **commenter les lignes `dm_*`** pour ne pousser que `dwh.*`.
+> * Puis lancez **l’étape 4 (optionnelle)** pour créer le datamart directement dans PostgreSQL :
+>   `python scripts/build_datamart_via_postgres.py`
+>   (vous pouvez ensuite exécuter `python scripts/fix_datamart_schema.py` pour harmoniser certains types de colonnes si nécessaire).
 
 ---
 
-## 5.8. Configuration et lancement d’Airflow
+## 5.8. Orchestration planifiée avec Airflow (Docker)
 
-Airflow est installé dans le venv Python.
-Initialiser la base de métadonnées et créer l’utilisateur administrateur :
-
-```bash
-export AIRFLOW_HOME=$(pwd)/.airflow
-airflow db init
-airflow users create \
-  --username admin \
-  --firstname Admin \
-  --lastname User \
-  --role Admin \
-  --email admin@example.com \
-  --password admin
-```
-
-Déposer le fichier **`dags/daily_etl.py`**, qui appelle `admin_pipeline.py`.
-Lancer les services Airflow :
+Le DAG `dags/daily_etl.py` déclenche `admin_pipeline.py` à l’horaire défini.
 
 ```bash
-airflow webserver -p 8080 &
-airflow scheduler &
+docker compose start airflow-webserver airflow-scheduler  # si non démarrés
+# Ouvrir l’UI : http://localhost:8080 (admin / admin) et activer le DAG `daily_etl`
 ```
-
-Interface disponible sur **[http://localhost:8080](http://localhost:8080)** → déclencher le DAG `daily_etl`.
 
 ---
 
-## 5.9. Vérifications fonctionnelles
+## 5.9. Vérifications rapides
 
-- **DBT :**
-
-  ```bash
-  dbt run && dbt test
-  ```
-
-- **PostgreSQL :**
+* **DBT**
 
   ```bash
-  PGPASSWORD=$DWH_POSTGRES_PASSWORD psql \
-  -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT \
-  -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB \
-  -c "\\dt dwh.*"
+  cd dbt && dbt run && dbt test
   ```
+* **PostgreSQL – DWH**
 
-- **Datamarts :** vérifier la présence des vues (`dm_consultations_analysis`, etc.)
-- **Power BI :** connecter directement le schéma `datamart` pour valider la lecture.
+  ```bash
+  docker exec -it chu-dwh psql -U admin -d healthcare_dwh -c "\dt dwh.*"
+  ```
+* **Datamarts**
+
+  * Si vous avez poussé les `dm_*` (mode étapes 1–3) : vérifiez `\dt datamart.*`.
+  * Si vous avez choisi la variante « DM direct PostgreSQL » (étape 4) : exécutez ensuite `python scripts/fix_datamart_schema.py` puis vérifiez `\d+ datamart.dm_consultations_agregees`.
+* **Power BI**
+
+  * Source : PostgreSQL `localhost:5433`, schéma `datamart` (RLS prêt).
 
 ---
 
 ## 5.10. Dépannage
 
-| Problème | Cause probable | Solution |
-| --- | --- | --- |
-| Port déjà utilisé | Un autre service PostgreSQL tourne | Modifier les ports dans `.env` puis relancer : `docker compose up -d` |
-| Variables non chargées | Le fichier `.env` n’est pas exporté | Exporter les variables : `export $(grep -v '^\s*#' .env | xargs)` ou utiliser `python-dotenv` / `direnv` |
-| Airflow ne démarre pas | Conflit ou base de métadonnées corrompue | Réinitialiser la base Airflow : `airflow db reset --yes` puis `airflow db init` ; vérifier les logs |
-| Échec de connexion DWH | Mauvais identifiants ou conteneur arrêté | Vérifier `.env`, relancer le conteneur et consulter les logs : `docker logs pg_dwh` |
-| Modules Python manquants | Dépendances non installées dans le venv | Activer le venv et installer : `source .venv/bin/activate && pip install -r requirements.txt` |
-| Tables / datamarts absents | Scripts d'initialisation non exécutés | Lancer les scripts d'init : `psql -h $DWH_POSTGRES_HOST -p $DWH_POSTGRES_PORT -U $DWH_POSTGRES_USER -d $DWH_POSTGRES_DB -f scripts/init/init_dwh.sql` |
-
-✅ **À ce stade, l’environnement est opérationnel.**
-Le pipeline peut être exécuté **à la demande via `admin_pipeline.py`** ou **planifié automatiquement par Airflow**.
+| Problème                                   | Cause probable                                    | Solution                                                                                                                                    |
+| ------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Airflow ne démarre pas                     | Services déjà actifs / init incomplet             | `docker compose down -v && docker compose up -d` ; vérifier les logs `docker logs chu-airflow-webserver`                                    |
+| Ports 5433/5434 occupés                    | Autre Postgres local en cours                     | Modifier les ports dans `docker-compose.yml` puis relancer                                                                                  |
+| Erreur `psycopg2` manquant                 | Dépendances venv incomplètes                      | `pip install psycopg2-binary`                                                                                                               |
+| Échec de connexion DWH                     | Conteneur `chu-dwh` non démarré                   | `docker start chu-dwh` puis retester la connexion `psql`                                                                                    |
+| Échec `push_dwh_to_postgres.py` sur `dm_*` | Les modèles datamart DBT n’ont pas été construits | Soit exécuter `dbt run` (incluant `marts/datamart`), soit commenter les lignes `dm_*` dans `TABLES_ORDRE` et construire le DM via l’étape 4 |
+| Schémas DM (types trop courts)             | Colonnes `sexe`, `tranche_age`, etc.              | `python scripts/fix_datamart_schema.py`                                                                                                     |
